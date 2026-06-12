@@ -76,7 +76,7 @@
               かんたんPDF書き込み・編集ツール
             </h1>
             <p class="text-xs text-slate-500">
-              文字や図形の書き込み、移動、背景色に合わせた文字消しがスムーズに行えます
+              文字や図形の書き込み、移動、サイズ調整、背景色に合わせた文字消しがスムーズに行えます
             </p>
           </div>
         </div>
@@ -165,7 +165,7 @@
                     d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
                   />
                 </svg>
-                <span>選択・位置の移動</span>
+                <span>選択・位置とサイズ変更</span>
               </button>
               <button
                 onclick="setTool('text')"
@@ -513,7 +513,7 @@
             <div
               class="text-xs text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 font-medium"
             >
-              ※「選択・位置の移動」ツールで文字をダブルクリックすると修正できます
+              ※「選択・位置とサイズ変更」ツールで青い角や辺をドラッグするとサイズを変更できます
             </div>
           </div>
 
@@ -603,6 +603,12 @@
       let isDraggingElement = false;
       let dragStartX = 0;
       let dragStartY = 0;
+
+      // --- リサイズ機能用状態管理 ---
+      let isResizing = false;
+      let resizeHandle = null; // 'nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'
+      let resizeTarget = null;
+      let resizeStartRect = null;
 
       // ドラッグ範囲選択ボックス用の状態管理
       let isDragSelecting = false;
@@ -970,6 +976,51 @@
         return ex1 < bx2 && ex2 > bx1 && ey1 < by2 && ey2 > by1;
       }
 
+      // 四角形の座標を左上基準（幅と高さを正の値）に正規化する関数
+      function normalizeRect(el) {
+        if (el.type !== "rect" && el.type !== "whiteout") return;
+        if (el.w < 0) {
+          el.x = el.x + el.w;
+          el.w = Math.abs(el.w);
+        }
+        if (el.h < 0) {
+          el.y = el.y + el.h;
+          el.h = Math.abs(el.h);
+        }
+      }
+
+      // リサイズハンドルの位置を計算し、マウス位置がハンドル上にあるか判定する関数
+      function getResizeHandleAt(mx, my, el) {
+        if (el.type !== "rect" && el.type !== "whiteout") return null;
+        const x = el.x;
+        const y = el.y;
+        const w = el.w;
+        const h = el.h;
+
+        const handles = {
+          nw: { x: x, y: y, cursor: "nwse-resize" },
+          n: { x: x + w / 2, y: y, cursor: "ns-resize" },
+          ne: { x: x + w, y: y, cursor: "nesw-resize" },
+          e: { x: x + w, y: y + h / 2, cursor: "ew-resize" },
+          se: { x: x + w, y: y + h, cursor: "nwse-resize" },
+          s: { x: x + w / 2, y: y + h, cursor: "ns-resize" },
+          sw: { x: x, y: y + h, cursor: "nesw-resize" },
+          w: { x: x, y: y + h / 2, cursor: "ew-resize" },
+        };
+
+        const threshold = 8; // ハンドルホバーの判定領域 (px)
+        for (const name in handles) {
+          const hp = handles[name];
+          if (
+            Math.abs(mx - hp.x) <= threshold &&
+            Math.abs(my - hp.y) <= threshold
+          ) {
+            return { name, cursor: hp.cursor };
+          }
+        }
+        return null;
+      }
+
       function drawEditorLayers() {
         eCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
         const items = annotationsPerPage[currentPageNum] || [];
@@ -1033,6 +1084,45 @@
             }
             eCtx.strokeRect(bx, by, bw, bh);
             eCtx.restore();
+
+            // 単一選択かつ rect もしくは whiteout の場合に、8箇所の調整ハンドルを描画する
+            if (
+              selectedElements.length === 1 &&
+              (el.type === "rect" || el.type === "whiteout")
+            ) {
+              eCtx.save();
+              eCtx.fillStyle = "#2563eb"; // ハンドルの内側（青）
+              eCtx.strokeStyle = "#ffffff"; // ハンドルの縁（白）
+              eCtx.lineWidth = 1.5;
+              const handleRadius = 5;
+
+              const hPoints = [
+                { x: el.x, y: el.y }, // nw
+                { x: el.x + el.w / 2, y: el.y }, // n
+                { x: el.x + el.w, y: el.y }, // ne
+                { x: el.x + el.w, y: el.y + el.h / 2 }, // e
+                { x: el.x + el.w, y: el.y + el.h }, // se
+                { x: el.x + el.w / 2, y: el.y + el.h }, // s
+                { x: el.x, y: el.y + el.h }, // sw
+                { x: el.x, y: el.y + el.h / 2 }, // w
+              ];
+
+              hPoints.forEach((pt) => {
+                eCtx.fillRect(
+                  pt.x - handleRadius,
+                  pt.y - handleRadius,
+                  handleRadius * 2,
+                  handleRadius * 2,
+                );
+                eCtx.strokeRect(
+                  pt.x - handleRadius,
+                  pt.y - handleRadius,
+                  handleRadius * 2,
+                  handleRadius * 2,
+                );
+              });
+              eCtx.restore();
+            }
           }
         });
 
@@ -1328,8 +1418,32 @@
           return;
         }
 
-        // 2. 選択・移動モードの処理（複数選択対応）
+        // 2. 選択・移動モードの処理（複数選択対応 + リサイズ対応）
         if (currentTool === "select") {
+          // 単一選択中かつ、rectもしくはwhiteoutの場合は、リサイズハンドルのクリック判定を最初に行う
+          if (
+            selectedElements.length === 1 &&
+            (selectedElements[0].type === "rect" ||
+              selectedElements[0].type === "whiteout")
+          ) {
+            const handle = getResizeHandleAt(pos.x, pos.y, selectedElements[0]);
+            if (handle) {
+              isResizing = true;
+              resizeHandle = handle.name;
+              resizeTarget = selectedElements[0];
+              resizeStartRect = {
+                x: resizeTarget.x,
+                y: resizeTarget.y,
+                w: resizeTarget.w,
+                h: resizeTarget.h,
+              };
+              dragStartX = pos.x;
+              dragStartY = pos.y;
+              editorCanvas.style.cursor = handle.cursor;
+              return;
+            }
+          }
+
           const found = findElementAt(pos.x, pos.y);
           if (found) {
             // 要素をクリックした場合
@@ -1458,7 +1572,95 @@
         const curX = pos.x;
         const curY = pos.y;
 
-        // 選択モード中の挙動（複数ドラッグ移動 ＆ ドラッグ範囲選択ボックス更新）
+        // --- A. リサイズ調整中の場合 ---
+        if (isResizing && resizeTarget) {
+          const dx = curX - dragStartX;
+          const dy = curY - dragStartY;
+          const start = resizeStartRect;
+          const minSize = 8; // 最小サイズ
+
+          let nextX = start.x;
+          let nextY = start.y;
+          let nextW = start.w;
+          let nextH = start.h;
+
+          switch (resizeHandle) {
+            case "nw":
+              nextX = start.x + dx;
+              nextY = start.y + dy;
+              nextW = start.w - dx;
+              nextH = start.h - dy;
+              if (nextW < minSize) {
+                nextX = start.x + start.w - minSize;
+                nextW = minSize;
+              }
+              if (nextH < minSize) {
+                nextY = start.y + start.h - minSize;
+                nextH = minSize;
+              }
+              break;
+            case "n":
+              nextY = start.y + dy;
+              nextH = start.h - dy;
+              if (nextH < minSize) {
+                nextY = start.y + start.h - minSize;
+                nextH = minSize;
+              }
+              break;
+            case "ne":
+              nextY = start.y + dy;
+              nextW = start.w + dx;
+              nextH = start.h - dy;
+              if (nextW < minSize) nextW = minSize;
+              if (nextH < minSize) {
+                nextY = start.y + start.h - minSize;
+                nextH = minSize;
+              }
+              break;
+            case "e":
+              nextW = start.w + dx;
+              if (nextW < minSize) nextW = minSize;
+              break;
+            case "se":
+              nextW = start.w + dx;
+              nextH = start.h + dy;
+              if (nextW < minSize) nextW = minSize;
+              if (nextH < minSize) nextH = minSize;
+              break;
+            case "s":
+              nextH = start.h + dy;
+              if (nextH < minSize) nextH = minSize;
+              break;
+            case "sw":
+              nextX = start.x + dx;
+              nextW = start.w - dx;
+              nextH = start.h + dy;
+              if (nextW < minSize) {
+                nextX = start.x + start.w - minSize;
+                nextW = minSize;
+              }
+              if (nextH < minSize) nextH = minSize;
+              break;
+            case "w":
+              nextX = start.x + dx;
+              nextW = start.w - dx;
+              if (nextW < minSize) {
+                nextX = start.x + start.w - minSize;
+                nextW = minSize;
+              }
+              break;
+          }
+
+          resizeTarget.x = nextX;
+          resizeTarget.y = nextY;
+          resizeTarget.w = nextW;
+          resizeTarget.h = nextH;
+
+          drawEditorLayers();
+          return;
+        }
+
+        // --- B. 選択モード中の挙動 ---
         if (currentTool === "select") {
           if (isDraggingElement && selectedElements.length > 0) {
             const dx = curX - dragStartX;
@@ -1484,6 +1686,25 @@
             dragSelectEndX = curX;
             dragSelectEndY = curY;
             drawEditorLayers();
+          } else {
+            // マウスを動かしているだけのとき：カーソル表示の動的切り替え
+            if (
+              selectedElements.length === 1 &&
+              (selectedElements[0].type === "rect" ||
+                selectedElements[0].type === "whiteout")
+            ) {
+              const handle = getResizeHandleAt(curX, curY, selectedElements[0]);
+              if (handle) {
+                editorCanvas.style.cursor = handle.cursor;
+                return;
+              }
+            }
+            const found = findElementAt(curX, curY);
+            if (found) {
+              editorCanvas.style.cursor = "move";
+            } else {
+              editorCanvas.style.cursor = ""; // cssに委ねる
+            }
           }
           return;
         }
@@ -1524,6 +1745,19 @@
       }
 
       function endAction(e) {
+        // リサイズ終了時の正規化およびリセット
+        if (isResizing) {
+          isResizing = false;
+          if (resizeTarget) {
+            normalizeRect(resizeTarget);
+          }
+          resizeTarget = null;
+          resizeStartRect = null;
+          editorCanvas.style.cursor = "";
+          drawEditorLayers();
+          return;
+        }
+
         if (currentTool === "select") {
           isDraggingElement = false;
           if (isDragSelecting) {
@@ -1546,7 +1780,7 @@
               );
 
               if (e.shiftKey) {
-                // Shiftキー押下中の場合は、重複なく既存の選択リストへ合体（マージ）
+                // Shiftキー押下中の場合は、重複なく既存 of 選択リストへ合体（マージ）
                 newlySelected.forEach((el) => {
                   if (!selectedElements.some((s) => s.id === el.id)) {
                     selectedElements.push(el);
@@ -1574,7 +1808,7 @@
         const newId = Date.now() + Math.random().toString(36).substr(2, 5);
 
         if (currentTool === "rect" || currentTool === "whiteout") {
-          annotationsPerPage[currentPageNum].push({
+          const newEl = {
             id: newId,
             type: currentTool,
             x: startX,
@@ -1583,7 +1817,9 @@
             h: endY - startY,
             color: color,
             size: size,
-          });
+          };
+          normalizeRect(newEl); // 描き終わったタイミングで座標を左上基準に正規化する
+          annotationsPerPage[currentPageNum].push(newEl);
         } else if (currentTool === "free") {
           annotationsPerPage[currentPageNum].push(currentFreehandPath);
         }
