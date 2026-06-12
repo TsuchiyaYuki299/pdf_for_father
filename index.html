@@ -1084,22 +1084,12 @@
           y = el.y,
           w = el.w,
           h = el.h;
-        const handles = {
-          nw: { x: x, y: y, cursor: "nwse-resize" },
-          n: { x: x + w / 2, y: y, cursor: "ns-resize" },
-          ne: { x: x + w, y: y + h / 2, cursor: "nesw-resize" },
-          e: { x: x + w, y: y + h / 2, cursor: "ew-resize" },
-          se: { x: x + w, y: y + h, cursor: "nwse-resize" },
-          s: { x: x + w / 2, y: y + h, cursor: "ns-resize" },
-          sw: { x: x, y: y + h, cursor: "nesw-resize" },
-          w: { x: x, y: y + h / 2, cursor: "ew-resize" },
-        };
-        for (const name in handles) {
-          if (
-            Math.abs(mx - handles[name].x) <= threshold &&
-            Math.abs(my - handles[name].y) <= threshold
-          )
-            return { name, cursor: handles[name].cursor };
+        // 簡易ハンドルのため右下（se）のみ判定を返す
+        if (
+          Math.abs(mx - (x + w)) <= threshold &&
+          Math.abs(my - (y + h)) <= threshold
+        ) {
+          return { name: "se", cursor: "nwse-resize" };
         }
         return null;
       }
@@ -1199,13 +1189,30 @@
               bh = tokens.some((t) => t.type === "kanji" && t.ruby)
                 ? el.size * 1.5 + el.size * 1.5 * 0.5 * 1.2
                 : el.size * 1.5;
+              eCtx.strokeRect(bx, by, bw, bh);
+            } else if (el.type === "line") {
+              eCtx.strokeRect(
+                Math.min(el.x, el.x + el.w) - 4,
+                Math.min(el.y, el.y + el.h) - 4,
+                Math.abs(el.w) + 8,
+                Math.abs(el.h) + 8,
+              );
+
+              eCtx.setLineDash([]);
+              eCtx.fillStyle = "#2563eb";
+              eCtx.fillRect(el.x - 4, el.y - 4, 8, 8);
+              eCtx.fillRect(el.x + el.w - 4, el.y + el.h - 4, 8, 8);
             } else {
               bx = Math.min(el.x, el.x + el.w) - 4;
               by = Math.min(el.y, el.y + el.h) - 4;
               bw = Math.abs(el.w) + 8;
               bh = Math.abs(el.h) + 8;
+              eCtx.strokeRect(bx, by, bw, bh);
+
+              eCtx.setLineDash([]);
+              eCtx.fillStyle = "#2563eb";
+              eCtx.fillRect(el.x + el.w - 4, el.y + el.h - 4, 8, 8);
             }
-            eCtx.strokeRect(bx, by, bw, bh);
             eCtx.restore();
           }
         });
@@ -1260,7 +1267,6 @@
         }
       }
 
-      // 座標算出ヘルパー
       function getEventPos(e) {
         const rect = editorCanvas.getBoundingClientRect();
         let clientX = 0,
@@ -1309,6 +1315,20 @@
         }
 
         if (currentTool === "select") {
+          if (selectedElements.length === 1) {
+            const el = selectedElements[0];
+            const handle = getResizeHandleAt(pos.x, pos.y, el);
+            if (handle) {
+              isResizing = true;
+              resizeHandle = handle.name;
+              resizeTarget = el;
+              resizeStartRect = { x: el.x, y: el.y, w: el.w, h: el.h };
+              dragStartX = pos.x;
+              dragStartY = pos.y;
+              return;
+            }
+          }
+
           const found = findElementAt(pos.x, pos.y);
           if (found) {
             if (!selectedElements.some((el) => el.id === found.id))
@@ -1501,10 +1521,12 @@
         const pos = getEventPos(e);
         let curX = pos.x,
           curY = pos.y;
+
         if (isResizing && resizeTarget) {
           const dx = curX - dragStartX,
             dy = curY - dragStartY,
             start = resizeStartRect;
+
           if (resizeTarget.type === "line") {
             if (resizeHandle === "start") {
               const fx = start.x + start.w,
@@ -1516,7 +1538,7 @@
               resizeTarget.y = tPos.y;
               resizeTarget.w = fx - tPos.x;
               resizeTarget.h = fy - tPos.y;
-            } else {
+            } else if (resizeHandle === "end") {
               const fx = start.x,
                 fy = start.y,
                 tPos = e.shiftKey
@@ -1525,19 +1547,34 @@
               resizeTarget.w = tPos.x - fx;
               resizeTarget.h = tPos.y - fy;
             }
-          } else {
-            let nw = start.w + dx,
-              nh = start.h + dy;
-            if (nw < 8) nw = 8;
-            if (nh < 8) nh = 8;
-            resizeTarget.w = nw;
-            resizeTarget.h = nh;
+          } else if (
+            resizeTarget.type === "rect" ||
+            resizeTarget.type === "whiteout"
+          ) {
+            if (resizeHandle === "se") {
+              resizeTarget.w = start.w + dx;
+              resizeTarget.h = start.h + dy;
+            }
           }
           drawEditorLayers();
           return;
         }
 
         if (currentTool === "select") {
+          if (
+            selectedElements.length === 1 &&
+            !isDraggingElement &&
+            !isDragSelecting
+          ) {
+            const handle = getResizeHandleAt(pos.x, pos.y, selectedElements[0]);
+            if (handle) {
+              editorCanvas.style.cursor = handle.cursor;
+            } else {
+              const found = findElementAt(pos.x, pos.y);
+              editorCanvas.style.cursor = found ? "move" : "default";
+            }
+          }
+
           if (isDraggingElement && selectedElements.length > 0) {
             const dx = curX - dragStartX,
               dy = curY - dragStartY;
@@ -1571,7 +1608,6 @@
         eCtx.lineWidth = parseInt(sizeSlider.value);
 
         if (currentTool === "line") {
-          // --- 【修正箇所】描画中もShiftキーが押されていたら45度スナップを適用する ---
           let targetPos = { x: curX, y: curY };
           if (e.shiftKey) {
             targetPos = getSnappedPos(startX, startY, curX, curY);
@@ -1635,7 +1671,6 @@
           opacity = parseInt(opacitySlider.value) / 100;
 
         if (currentTool === "line") {
-          // --- 【修正箇所】指を離した瞬間も、Shiftキーが押されていたら45度スナップした座標で保存する ---
           let targetPos = { x: pos.x, y: pos.y };
           if (e.shiftKey) {
             targetPos = getSnappedPos(startX, startY, pos.x, pos.y);
@@ -1670,12 +1705,10 @@
         drawEditorLayers();
       }
 
-      // --- 【修正の核心：イベントリスナーの登録を追加】 ---
       editorCanvas.addEventListener("mousedown", startAction);
       editorCanvas.addEventListener("mousemove", moveAction);
       window.addEventListener("mouseup", endAction);
 
-      // タッチ環境（タブレット等）対応
       editorCanvas.addEventListener(
         "touchstart",
         (e) => {
@@ -1796,7 +1829,6 @@
         return tempCanvas.toDataURL("image/png");
       }
 
-      // Base64デコードヘルパー
       function base64ToUint8Array(base64) {
         const binaryString = window.atob(base64);
         const len = binaryString.length;
