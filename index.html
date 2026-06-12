@@ -76,7 +76,7 @@
               かんたんPDF書き込み・編集ツール
             </h1>
             <p class="text-xs text-slate-500">
-              文字や図形・直線の書き込み、移動、サイズ調整、背景色に合わせた文字消しがスムーズに行えます
+              文字や図形・直線の書き込み、移動、サイズや透明度の調整、背景色に合わせた文字消しがスムーズに行えます
             </p>
           </div>
         </div>
@@ -352,6 +352,25 @@
                 class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
               />
             </div>
+
+            <!-- 不透明度（透明度）調整スライダー -->
+            <div>
+              <div
+                class="flex justify-between text-xs font-bold text-slate-400 mb-1"
+              >
+                <span>不透明度</span>
+                <span id="opacityValue" class="text-slate-600">100 %</span>
+              </div>
+              <input
+                type="range"
+                id="opacitySlider"
+                min="10"
+                max="100"
+                value="100"
+                step="5"
+                class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+            </div>
           </div>
 
           <!-- アクション -->
@@ -533,8 +552,7 @@
             <div
               class="text-xs text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 font-medium"
             >
-              ※「直線を描く」では Shift
-              キーを押しながらドラッグすると、45度スナップします。
+              ※不透明度を下げると、蛍光マーカーペンのような書き込みや透かし文字もカンタンに作れます。
             </div>
           </div>
 
@@ -650,6 +668,15 @@
         whiteout: "#ffffff", // 塗りつぶし消しゴム
       };
 
+      // ツールごとの「前回使った不透明度」を記憶するオブジェクト
+      const toolOpacities = {
+        text: 1.0, // 文字の書き込み (デフォルト：100%)
+        line: 1.0, // 直線 (デフォルト：100%)
+        rect: 1.0, // 四角形 (デフォルト：100%)
+        free: 1.0, // 手書きペン (デフォルト：100%)
+        whiteout: 1.0, // 塗りつぶし消しゴム (デフォルト：100%)
+      };
+
       // ページごとの編集データを保持するオブジェクト
       const annotationsPerPage = {};
       const pageViewportSizes = {};
@@ -666,6 +693,8 @@
       const colorPicker = document.getElementById("colorPicker");
       const sizeSlider = document.getElementById("sizeSlider");
       const sizeValueDisplay = document.getElementById("sizeValue");
+      const opacitySlider = document.getElementById("opacitySlider");
+      const opacityValueDisplay = document.getElementById("opacityValue");
 
       // カラーピッカーの値が手動で変更された場合のイベント処理
       colorPicker.addEventListener("input", (e) => {
@@ -697,6 +726,29 @@
         if (selectedElements.length > 0) {
           selectedElements.forEach((el) => {
             el.size = newSize;
+          });
+          drawEditorLayers();
+        }
+      });
+
+      // 不透明度の変更および選択要素への即時反映
+      opacitySlider.addEventListener("input", (e) => {
+        const newOpacity = parseInt(e.target.value);
+        opacityValueDisplay.textContent = `${newOpacity} %`;
+        const opacityDecimal = newOpacity / 100;
+
+        // 現在のツールの記憶不透明度を変更
+        if (toolOpacities[currentTool] !== undefined) {
+          toolOpacities[currentTool] = opacityDecimal;
+        }
+
+        if (selectedElements.length > 0) {
+          selectedElements.forEach((el) => {
+            el.opacity = opacityDecimal;
+            // 選択された要素のタイプに応じた記憶不透明度もアップデート
+            if (toolOpacities[el.type] !== undefined) {
+              toolOpacities[el.type] = opacityDecimal;
+            }
           });
           drawEditorLayers();
         }
@@ -868,7 +920,7 @@
         );
       }
 
-      // カラー表示のテキスト更新処理
+      // カラー表示 of テキスト更新処理
       const colorNames = {
         "#ef4444": "赤",
         "#3b82f6": "青",
@@ -922,6 +974,14 @@
           const savedColor = toolColors[toolName];
           colorPicker.value = savedColor;
           updateColorDisplayText(savedColor);
+        }
+
+        // --- 切り替え先ツールに記憶されている不透明度を呼び出して設定 ---
+        if (toolOpacities[toolName] !== undefined) {
+          const savedOpacity = toolOpacities[toolName];
+          const percent = Math.round(savedOpacity * 100);
+          opacitySlider.value = percent;
+          opacityValueDisplay.textContent = `${percent} %`;
         }
 
         // 選択移動・スポイトツール以外に切り替えた場合は選択表示を消す
@@ -1104,11 +1164,14 @@
         const items = annotationsPerPage[currentPageNum] || [];
 
         items.forEach((el) => {
+          eCtx.save(); // 各描画のコンテキスト状態を保持
           eCtx.strokeStyle = el.color;
           eCtx.fillStyle = el.color;
           eCtx.lineWidth = el.size;
           eCtx.lineCap = "round";
           eCtx.lineJoin = "round";
+          // 要素個別の不透明度を設定 (デフォルトは 1.0)
+          eCtx.globalAlpha = el.opacity !== undefined ? el.opacity : 1.0;
 
           if (el.type === "line") {
             eCtx.beginPath();
@@ -1121,7 +1184,10 @@
             eCtx.fillStyle = el.color; // 保持されているel.colorを使って塗りつぶし
             eCtx.fillRect(el.x, el.y, el.w, el.h);
           } else if (el.type === "free") {
-            if (el.points.length < 2) return;
+            if (el.points.length < 2) {
+              eCtx.restore();
+              return;
+            }
             eCtx.beginPath();
             eCtx.moveTo(el.points[0].x, el.points[0].y);
             for (let i = 1; i < el.points.length; i++) {
@@ -1133,8 +1199,9 @@
             eCtx.textBaseline = "top";
             eCtx.fillText(el.text, el.x, el.y);
           }
+          eCtx.restore(); // 描画状態をリセット
 
-          // 選択された各要素の周囲に、青い破線のガイド（枠）を描画
+          // 選択された各要素の周囲に、青い破線のガイド（枠）を描画（透明度の影響を受けないようにする）
           if (selectedElements.some((sel) => sel.id === el.id)) {
             eCtx.save();
             eCtx.strokeStyle = "#2563eb"; // よりはっきりした青に変更
@@ -1486,6 +1553,7 @@
 
         const color = colorPicker.value;
         const size = parseInt(sizeSlider.value);
+        const opacity = parseInt(opacitySlider.value) / 100;
 
         // 1. スポイトツールのピクセル色取得処理
         if (currentTool === "picker") {
@@ -1578,7 +1646,7 @@
             dragStartX = pos.x;
             dragStartY = pos.y;
 
-            // 選択リストの先頭要素のカラー・太さをサイドメニューバーに同期反映
+            // 選択リストの先頭要素のカラー・太さ・不透明度をサイドメニューバーに同期反映
             const primarySel = selectedElements[0];
             if (primarySel.color) {
               colorPicker.value = primarySel.color;
@@ -1587,6 +1655,21 @@
             if (primarySel.size) {
               sizeSlider.value = primarySel.size;
               sizeValueDisplay.textContent = `${primarySel.size} px`;
+            }
+            if (primarySel.opacity !== undefined) {
+              const percent = Math.round(primarySel.opacity * 100);
+              opacitySlider.value = percent;
+              opacityValueDisplay.textContent = `${percent} %`;
+              // 選択された要素のタイプに対応する前回の不透明度も同期
+              if (toolOpacities[primarySel.type] !== undefined) {
+                toolOpacities[primarySel.type] = primarySel.opacity;
+              }
+            } else {
+              opacitySlider.value = 100;
+              opacityValueDisplay.textContent = "100 %";
+              if (toolOpacities[primarySel.type] !== undefined) {
+                toolOpacities[primarySel.type] = 1.0;
+              }
             }
           } else {
             // 何もない場所をクリックした場合
@@ -1618,6 +1701,7 @@
           input.style.left = `${pos.x}px`;
           input.style.top = `${pos.y}px`;
           input.style.fontSize = `${size * 1.5}px`;
+          input.style.opacity = opacity; // 入力枠も少し透明にしてプレビュー感を出す
           input.placeholder = "文字を入力...";
 
           document.getElementById("canvasParent").appendChild(input);
@@ -1642,6 +1726,7 @@
                 text: textVal,
                 color: color,
                 size: size,
+                opacity: opacity,
               });
               drawEditorLayers();
             }
@@ -1669,6 +1754,7 @@
             type: "free",
             color: color,
             size: size,
+            opacity: opacity,
             points: [{ x: startX, y: startY }],
           };
         }
@@ -1848,16 +1934,20 @@
 
         if (!isDrawing) return;
 
-        drawEditorLayers(); // プレビューの再描画
+        drawEditorLayers(); // 他の描いた要素をまずは再描画
 
         const color = colorPicker.value;
         const size = parseInt(sizeSlider.value);
+        const opacity = parseInt(opacitySlider.value) / 100;
 
+        // ドラッグ中（一時描画）プレビュー部分にも不透明度を一時適用
+        eCtx.save();
         eCtx.strokeStyle = color;
         eCtx.fillStyle = color;
         eCtx.lineWidth = size;
         eCtx.lineCap = "round";
         eCtx.lineJoin = "round";
+        eCtx.globalAlpha = opacity;
 
         if (currentTool === "line") {
           let drawEndX = curX;
@@ -1891,6 +1981,7 @@
           }
           eCtx.stroke();
         }
+        eCtx.restore();
       }
 
       function endAction(e) {
@@ -1954,6 +2045,7 @@
 
         const color = colorPicker.value;
         const size = parseInt(sizeSlider.value);
+        const opacity = parseInt(opacitySlider.value) / 100;
         const newId = Date.now() + Math.random().toString(36).substr(2, 5);
 
         if (currentTool === "line") {
@@ -1971,6 +2063,7 @@
             h: endY - startY,
             color: color,
             size: size,
+            opacity: opacity,
           });
         } else if (currentTool === "rect" || currentTool === "whiteout") {
           const newEl = {
@@ -1982,6 +2075,7 @@
             h: endY - startY,
             color: color,
             size: size,
+            opacity: opacity,
           };
           normalizeRect(newEl); // 描き終わったタイミングで座標を左上基準に正規化する
           annotationsPerPage[currentPageNum].push(newEl);
@@ -2060,11 +2154,14 @@
         const scaleY = (pdfHeight * scaleFactor) / viewHeight;
 
         items.forEach((el) => {
+          tCtx.save(); // 各要素のコンテキスト状態を保持
           tCtx.strokeStyle = el.color;
           tCtx.fillStyle = el.color;
           tCtx.lineWidth = el.size * scaleX;
           tCtx.lineCap = "round";
           tCtx.lineJoin = "round";
+          // PDF合成用の出力レイヤーにも不透明度をしっかり反映
+          tCtx.globalAlpha = el.opacity !== undefined ? el.opacity : 1.0;
 
           if (el.type === "line") {
             tCtx.beginPath();
@@ -2087,7 +2184,10 @@
               el.h * scaleY,
             );
           } else if (el.type === "free") {
-            if (el.points.length < 2) return;
+            if (el.points.length < 2) {
+              tCtx.restore();
+              return;
+            }
             tCtx.beginPath();
             tCtx.moveTo(el.points[0].x * scaleX, el.points[0].y * scaleY);
             for (let i = 1; i < el.points.length; i++) {
@@ -2100,6 +2200,7 @@
             tCtx.textBaseline = "top";
             tCtx.fillText(el.text, el.x * scaleX, el.y * scaleY);
           }
+          tCtx.restore();
         });
 
         return tempCanvas.toDataURL("image/png");
