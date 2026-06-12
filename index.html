@@ -353,7 +353,7 @@
               />
             </div>
 
-            <!-- 不透明度（透明度）調整スライダーを追加 -->
+            <!-- 不透明度（透明度）調整スライダー -->
             <div>
               <div
                 class="flex justify-between text-xs font-bold text-slate-400 mb-1"
@@ -668,6 +668,15 @@
         whiteout: "#ffffff", // 塗りつぶし消しゴム
       };
 
+      // ツールごとの「前回使った不透明度」を記憶するオブジェクト
+      const toolOpacities = {
+        text: 1.0, // 文字の書き込み (デフォルト：100%)
+        line: 1.0, // 直線 (デフォルト：100%)
+        rect: 1.0, // 四角形 (デフォルト：100%)
+        free: 1.0, // 手書きペン (デフォルト：100%)
+        whiteout: 1.0, // 塗りつぶし消しゴム (デフォルト：100%)
+      };
+
       // ページごとの編集データを保持するオブジェクト
       const annotationsPerPage = {};
       const pageViewportSizes = {};
@@ -726,9 +735,20 @@
       opacitySlider.addEventListener("input", (e) => {
         const newOpacity = parseInt(e.target.value);
         opacityValueDisplay.textContent = `${newOpacity} %`;
+        const opacityDecimal = newOpacity / 100;
+
+        // 現在のツールの記憶不透明度を変更
+        if (toolOpacities[currentTool] !== undefined) {
+          toolOpacities[currentTool] = opacityDecimal;
+        }
+
         if (selectedElements.length > 0) {
           selectedElements.forEach((el) => {
-            el.opacity = newOpacity / 100;
+            el.opacity = opacityDecimal;
+            // 選択された要素のタイプに応じた記憶不透明度もアップデート
+            if (toolOpacities[el.type] !== undefined) {
+              toolOpacities[el.type] = opacityDecimal;
+            }
           });
           drawEditorLayers();
         }
@@ -956,6 +976,14 @@
           updateColorDisplayText(savedColor);
         }
 
+        // --- 切り替え先ツールに記憶されている不透明度を呼び出して設定 ---
+        if (toolOpacities[toolName] !== undefined) {
+          const savedOpacity = toolOpacities[toolName];
+          const percent = Math.round(savedOpacity * 100);
+          opacitySlider.value = percent;
+          opacityValueDisplay.textContent = `${percent} %`;
+        }
+
         // 選択移動・スポイトツール以外に切り替えた場合は選択表示を消す
         if (toolName !== "select") {
           selectedElements = [];
@@ -1171,7 +1199,7 @@
             eCtx.textBaseline = "top";
             eCtx.fillText(el.text, el.x, el.y);
           }
-          eCtx.restore(); // 描画状態をリセット（これで globalAlpha が 1.0 に戻ります）
+          eCtx.restore(); // 描画状態をリセット
 
           // 選択された各要素の周囲に、青い破線のガイド（枠）を描画（透明度の影響を受けないようにする）
           if (selectedElements.some((sel) => sel.id === el.id)) {
@@ -1629,11 +1657,19 @@
               sizeValueDisplay.textContent = `${primarySel.size} px`;
             }
             if (primarySel.opacity !== undefined) {
-              opacitySlider.value = Math.round(primarySel.opacity * 100);
-              opacityValueDisplay.textContent = `${Math.round(primarySel.opacity * 100)} %`;
+              const percent = Math.round(primarySel.opacity * 100);
+              opacitySlider.value = percent;
+              opacityValueDisplay.textContent = `${percent} %`;
+              // 選択された要素のタイプに対応する前回の不透明度も同期
+              if (toolOpacities[primarySel.type] !== undefined) {
+                toolOpacities[primarySel.type] = primarySel.opacity;
+              }
             } else {
               opacitySlider.value = 100;
               opacityValueDisplay.textContent = "100 %";
+              if (toolOpacities[primarySel.type] !== undefined) {
+                toolOpacities[primarySel.type] = 1.0;
+              }
             }
           } else {
             // 何もない場所をクリックした場合
