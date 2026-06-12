@@ -24,7 +24,7 @@
         cursor: cell !important;
       }
 
-      /* 選択されたアクティブなツールのスタイル */
+      /* 選択されたアクティブなツールのスタイル（ホバー時の白背景との競合を!importantで完全に防ぎます） */
       .btn-tool-active-blue {
         background-color: #2563eb !important; /* bg-blue-600 */
         color: #ffffff !important; /* text-white */
@@ -207,27 +207,6 @@
                 </svg>
                 <span>四角形を描く</span>
               </button>
-              <!-- 直線を描くツール -->
-              <button
-                onclick="setTool('line')"
-                id="tool-line"
-                class="btn-tool flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-sm font-semibold transition-all bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-              >
-                <svg
-                  class="w-5 h-5 text-slate-500"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M4 20L20 4"
-                  />
-                </svg>
-                <span>直線を描く</span>
-              </button>
               <button
                 onclick="setTool('free')"
                 id="tool-free"
@@ -295,7 +274,7 @@
             </div>
           </div>
 
-          <!-- 太さ・色・不透明度調整 -->
+          <!-- 太さ・色調整 -->
           <div class="border-t border-slate-100 pt-4 flex flex-col gap-4">
             <div>
               <div
@@ -335,24 +314,6 @@
                   ></button>
                 </div>
               </div>
-            </div>
-
-            <!-- 直感的な不透明度調整スライダーの追加 -->
-            <div>
-              <div
-                class="flex justify-between text-xs font-bold text-slate-400 mb-1"
-              >
-                <span>色の不透明度 (透け具合)</span>
-                <span id="opacityValue" class="text-slate-600">100 %</span>
-              </div>
-              <input
-                type="range"
-                id="opacitySlider"
-                min="10"
-                max="100"
-                value="100"
-                class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-              />
             </div>
 
             <div>
@@ -473,12 +434,6 @@
                   >Shift</kbd
                 >
                 + クリック、または範囲ドラッグで複数選択可能
-              </li>
-              <li class="leading-snug">
-                <kbd class="bg-slate-100 px-1 border rounded text-[10px]"
-                  >Shift</kbd
-                >
-                + 直線描画で45度ピタッとスナップ
               </li>
             </ul>
           </div>
@@ -649,14 +604,6 @@
       let dragStartX = 0;
       let dragStartY = 0;
 
-      // リサイズのための状態管理
-      let isResizing = false;
-      let activeHandle = null;
-      let resizeOrigX = 0,
-        resizeOrigY = 0,
-        resizeOrigW = 0,
-        resizeOrigH = 0;
-
       // ドラッグ範囲選択ボックス用の状態管理
       let isDragSelecting = false;
       let dragSelectStartX = 0;
@@ -671,18 +618,8 @@
       const toolColors = {
         text: "#000000", // 文字の書き込み（デフォルト：黒）
         rect: "#000000", // 四角形（デフォルト：黒）
-        line: "#000000", // 直線（デフォルト：黒）
         free: "#000000", // 手書きペン（デフォルト：黒）
         whiteout: "#ffffff", // 塗りつぶし消しゴム（デフォルト：白）
-      };
-
-      // ツールごとの「前回使った不透明度」を記憶するオブジェクト
-      const toolOpacities = {
-        text: 1.0,
-        rect: 1.0,
-        line: 1.0,
-        free: 1.0,
-        whiteout: 1.0,
       };
 
       // ページごとの編集データを保持するオブジェクト
@@ -701,48 +638,6 @@
       const colorPicker = document.getElementById("colorPicker");
       const sizeSlider = document.getElementById("sizeSlider");
       const sizeValueDisplay = document.getElementById("sizeValue");
-
-      // 不透明度スライダー要素の取得
-      const opacitySlider = document.getElementById("opacitySlider");
-      const opacityValueDisplay = document.getElementById("opacityValue");
-
-      // 点(px, py)と線分(x1, y1)-(x2, y2)の最短距離の二乗を計算する関数（直線クリック検知用）
-      function getSqSegDist(px, py, x1, y1, x2, y2) {
-        let dx = x2 - x1;
-        let dy = y2 - y1;
-        if (dx !== 0 || dy !== 0) {
-          let t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
-          if (t > 1) {
-            x1 = x2;
-            y1 = y2;
-          } else if (t > 0) {
-            x1 += dx * t;
-            y1 += dy * t;
-          }
-        }
-        dx = px - x1;
-        dy = py - y1;
-        return dx * dx + dy * dy;
-      }
-
-      // 不透明度スライダーの値が手動で変更された場合のイベント処理
-      opacitySlider.addEventListener("input", (e) => {
-        const newOpacity = parseInt(e.target.value) / 100;
-        opacityValueDisplay.textContent = `${e.target.value} %`;
-
-        // 現在アクティブなツールの記憶不透明度を更新
-        if (toolOpacities[currentTool] !== undefined) {
-          toolOpacities[currentTool] = newOpacity;
-        }
-
-        // 選択中の要素があれば即座に不透明度を反映
-        if (selectedElements.length > 0) {
-          selectedElements.forEach((el) => {
-            el.opacity = newOpacity;
-          });
-          drawEditorLayers();
-        }
-      });
 
       // カラーピッカーの値が手動で変更された場合のイベント処理
       colorPicker.addEventListener("input", (e) => {
@@ -784,19 +679,10 @@
       const fileInput = document.getElementById("fileInput");
 
       // ボックス枠内がクリックされたときにファイル選択画面を起動
-      uploadZone.addEventListener("click", (e) => {
-        // 子要素のボタンなど、クリックターゲットが何であっても1度だけトリガーする設計（イベント無限連鎖のバグを完全解消！）
-        if (e.target !== fileInput) {
-          fileInput.click();
-        }
+      uploadZone.addEventListener("click", () => {
+        fileInput.click();
       });
 
-      fileInput.addEventListener("change", (e) => {
-        const file = e.target.files[0];
-        if (file) loadPdfFile(file);
-      });
-
-      // ドラッグアンドドロップへの対応
       uploadZone.addEventListener("dragover", (e) => {
         e.preventDefault();
         uploadZone.classList.add("border-blue-500", "bg-blue-50/50");
@@ -812,6 +698,11 @@
         } else {
           showToast("PDFファイルをドラッグしてください。");
         }
+      });
+
+      fileInput.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) loadPdfFile(file);
       });
 
       function showToast(msg) {
@@ -867,7 +758,7 @@
           await renderPage(currentPageNum);
           setTool("select"); // 最初は選択移動ツールをデフォルトに
         } catch (err) {
-          showToast("PDFの読み込みに失敗しました。詳細: " + err.message);
+          showToast("PDFの読み込みに失敗しました。");
         }
       }
 
@@ -936,186 +827,33 @@
         }
       }
 
-      function drawEditorLayers() {
-        eCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
-        const items = annotationsPerPage[currentPageNum] || [];
-
-        items.forEach((el) => {
-          // コンテキストの不透明度を設定（蛍光ペンのような透かし表示に対応）
-          eCtx.save();
-          eCtx.globalAlpha = el.opacity !== undefined ? el.opacity : 1.0;
-
-          eCtx.strokeStyle = el.color;
-          eCtx.fillStyle = el.color;
-          eCtx.lineWidth = el.size;
-          eCtx.lineCap = "round";
-          eCtx.lineJoin = "round";
-
-          if (el.type === "rect") {
-            eCtx.strokeRect(el.x, el.y, el.w, el.h);
-          } else if (el.type === "whiteout") {
-            eCtx.fillStyle = el.color; // 保持されているel.colorを使って塗りつぶし
-            eCtx.fillRect(el.x, el.y, el.w, el.h);
-          } else if (el.type === "line") {
-            // 直線の描画
-            eCtx.beginPath();
-            eCtx.moveTo(el.x1, el.y1);
-            eCtx.lineTo(el.x2, el.y2);
-            eCtx.stroke();
-          } else if (el.type === "free") {
-            if (el.points.length < 2) {
-              eCtx.restore();
-              return;
-            }
-            eCtx.beginPath();
-            eCtx.moveTo(el.points[0].x, el.points[0].y);
-            for (let i = 1; i < el.points.length; i++) {
-              eCtx.lineTo(el.points[i].x, el.points[i].y);
-            }
-            eCtx.stroke();
-          } else if (el.type === "text") {
-            eCtx.font = `${el.size * 1.5}px sans-serif`;
-            eCtx.textBaseline = "top";
-            eCtx.fillText(el.text, el.x, el.y);
-          }
-
-          eCtx.restore(); // 不透明度の設定を復旧
-
-          // 選択された各要素の周囲に、青い破線のガイド（枠）を描画
-          if (selectedElements.some((sel) => sel.id === el.id)) {
-            eCtx.save();
-            eCtx.strokeStyle = "#2563eb"; // よりはっきりした青
-            eCtx.lineWidth = 1.5;
-            eCtx.setLineDash([4, 3]);
-
-            let bx = el.x,
-              by = el.y,
-              bw = 0,
-              bh = 0;
-            if (el.type === "text") {
-              bw = el.text.length * el.size * 0.95;
-              bh = el.size * 1.5;
-            } else if (el.type === "rect" || el.type === "whiteout") {
-              bx = Math.min(el.x, el.x + el.w) - 4;
-              by = Math.min(el.y, el.y + el.h) - 4;
-              bw = Math.abs(el.w) + 8;
-              bh = Math.abs(el.h) + 8;
-            } else if (el.type === "line") {
-              // 直線選択時のバウンディング枠
-              bx = Math.min(el.x1, el.x2) - 4;
-              by = Math.min(el.y1, el.y2) - 4;
-              bw = Math.abs(el.x1 - el.x2) + 8;
-              bh = Math.abs(el.y1 - el.y2) + 8;
-            } else if (el.type === "free") {
-              const xs = el.points.map((p) => p.x);
-              const ys = el.points.map((p) => p.y);
-              const minX = Math.min(...xs) - 6;
-              const maxX = Math.max(...xs) + 6;
-              const minY = Math.min(...ys) - 6;
-              const maxY = Math.max(...ys) + 6;
-              bx = minX;
-              by = minY;
-              bw = maxX - minX;
-              bh = maxY - minY;
-            }
-            eCtx.strokeRect(bx, by, bw, bh);
-            eCtx.restore();
-
-            // 四角形（矩形・塗りつぶし）が単一選択されている場合にリサイズハンドル（8箇所）を描画
-            if (
-              selectedElements.length === 1 &&
-              (el.type === "rect" || el.type === "whiteout")
-            ) {
-              const handleSize = 7;
-              const x1 = Math.min(el.x, el.x + el.w);
-              const x2 = Math.max(el.x, el.x + el.w);
-              const y1 = Math.min(el.y, el.y + el.h);
-              const y2 = Math.max(el.y, el.y + el.h);
-              const cx = (x1 + x2) / 2;
-              const cy = (y1 + y2) / 2;
-
-              const handleCoords = [
-                { x: x1, y: y1 }, // TL
-                { x: x2, y: y1 }, // TR
-                { x: x1, y: y2 }, // BL
-                { x: x2, y: y2 }, // BR
-                { x: cx, y: y1 }, // TC
-                { x: cx, y: y2 }, // BC
-                { x: x1, y: cy }, // LC
-                { x: x2, y: cy }, // RC
-              ];
-
-              eCtx.save();
-              eCtx.fillStyle = "#ffffff";
-              eCtx.strokeStyle = "#2563eb";
-              eCtx.lineWidth = 1.5;
-
-              handleCoords.forEach((h) => {
-                eCtx.fillRect(
-                  h.x - handleSize / 2,
-                  h.y - handleSize / 2,
-                  handleSize,
-                  handleSize,
-                );
-                eCtx.strokeRect(
-                  h.x - handleSize / 2,
-                  h.y - handleSize / 2,
-                  handleSize,
-                  handleSize,
-                );
-              });
-              eCtx.restore();
-            }
-
-            // 直線が単一選択されている場合に両端のリサイズハンドルを描画
-            if (selectedElements.length === 1 && el.type === "line") {
-              const handleSize = 7;
-              eCtx.save();
-              eCtx.fillStyle = "#ffffff";
-              eCtx.strokeStyle = "#2563eb";
-              eCtx.lineWidth = 1.5;
-
-              const points = [
-                { x: el.x1, y: el.y1 }, // 始点
-                { x: el.x2, y: el.y2 }, // 終点
-              ];
-
-              points.forEach((p) => {
-                eCtx.fillRect(
-                  p.x - handleSize / 2,
-                  p.y - handleSize / 2,
-                  handleSize,
-                  handleSize,
-                );
-                eCtx.strokeRect(
-                  p.x - handleSize / 2,
-                  p.y - handleSize / 2,
-                  handleSize,
-                  handleSize,
-                );
-              });
-              eCtx.restore();
-            }
-          }
-        });
-
-        // 範囲ドラッグ選択ボックスのプレビュー表示
-        if (isDragSelecting) {
-          eCtx.save();
-          eCtx.strokeStyle = "rgba(37, 99, 235, 0.85)"; // Tailwind blue-600
-          eCtx.fillStyle = "rgba(37, 99, 235, 0.08)";
-          eCtx.lineWidth = 1.5;
-          eCtx.setLineDash([5, 3]);
-          const x = dragSelectStartX;
-          const y = dragSelectStartY;
-          const w = dragSelectEndX - dragSelectStartX;
-          const h = dragSelectEndY - dragSelectStartY;
-          eCtx.fillRect(x, y, w, h);
-          eCtx.strokeRect(x, y, w, h);
-          eCtx.restore();
-        }
+      // RGB値をHEX文字列（#ffffff形式）に変換する補助関数
+      function rgbToHex(r, g, b) {
+        return (
+          "#" +
+          [r, g, b]
+            .map((x) => {
+              const hex = x.toString(16);
+              return hex.length === 1 ? "0" + hex : hex;
+            })
+            .join("")
+        );
       }
 
+      // カラー表示のテキスト更新処理
+      const colorNames = {
+        "#ef4444": "赤",
+        "#3b82f6": "青",
+        "#10b981": "緑",
+        "#000000": "黒",
+        "#ffffff": "白",
+      };
+      function updateColorDisplayText(hex) {
+        const text = colorNames[hex.toLowerCase()] || "カスタム色";
+        document.getElementById("currentColorText").textContent = text;
+      }
+
+      // ツールのトグル処理（ホバーとの色の競合を完全に防ぎます）
       function setTool(toolName) {
         currentTool = toolName;
 
@@ -1158,13 +896,6 @@
           updateColorDisplayText(savedColor);
         }
 
-        // 切り替え先ツールに記憶されている不透明度を呼び出して設定
-        if (toolOpacities[toolName] !== undefined) {
-          const savedOpacity = toolOpacities[toolName];
-          opacitySlider.value = Math.round(savedOpacity * 100);
-          opacityValueDisplay.textContent = `${Math.round(savedOpacity * 100)} %`;
-        }
-
         // 選択移動・スポイトツール以外に切り替えた場合は選択表示を消す
         if (toolName !== "select") {
           selectedElements = [];
@@ -1173,7 +904,183 @@
         }
       }
 
-      // 選択された要素を削除
+      // キャンバス上の要素を検知する関数
+      function findElementAt(x, y) {
+        const items = annotationsPerPage[currentPageNum] || [];
+        // クリックした位置の手前（配列の最後尾）にある要素から優先的に探す
+        for (let i = items.length - 1; i >= 0; i--) {
+          const el = items[i];
+          if (el.type === "text") {
+            const textWidth = el.text.length * el.size * 0.95;
+            const textHeight = el.size * 1.5;
+            if (
+              x >= el.x &&
+              x <= el.x + textWidth &&
+              y >= el.y &&
+              y <= el.y + textHeight
+            ) {
+              return el;
+            }
+          } else if (el.type === "rect" || el.type === "whiteout") {
+            const x1 = Math.min(el.x, el.x + el.w);
+            const x2 = Math.max(el.x, el.x + el.w);
+            const y1 = Math.min(el.y, el.y + el.h);
+            const y2 = Math.max(el.y, el.y + el.h);
+            if (x >= x1 && x <= x2 && y >= y1 && y <= y2) {
+              return el;
+            }
+          } else if (el.type === "free") {
+            // 手書き線の場合、いずれかの点とクリック位置が近ければ検出
+            for (const pt of el.points) {
+              const dist = Math.hypot(pt.x - x, pt.y - y);
+              if (dist < 15) {
+                return el;
+              }
+            }
+          }
+        }
+        return null;
+      }
+
+      // 要素がドラッグ範囲選択ボックスに入っているか判定する関数
+      function isElementInBox(el, bx1, bx2, by1, by2) {
+        let ex1, ex2, ey1, ey2;
+        if (el.type === "text") {
+          const textWidth = el.text.length * el.size * 0.95;
+          const textHeight = el.size * 1.5;
+          ex1 = el.x;
+          ex2 = el.x + textWidth;
+          ey1 = el.y;
+          ey2 = el.y + textHeight;
+        } else if (el.type === "rect" || el.type === "whiteout") {
+          ex1 = Math.min(el.x, el.x + el.w);
+          ex2 = Math.max(el.x, el.x + el.w);
+          ey1 = Math.min(el.y, el.y + el.h);
+          ey2 = Math.max(el.y, el.y + el.h);
+        } else if (el.type === "free") {
+          const xs = el.points.map((p) => p.x);
+          const ys = el.points.map((p) => p.y);
+          ex1 = Math.min(...xs);
+          ex2 = Math.max(...xs);
+          ey1 = Math.min(...ys);
+          ey2 = Math.max(...ys);
+        }
+
+        // 矩形交差判定（ボックスと要素の領域が少しでも重なっていれば選択）
+        return ex1 < bx2 && ex2 > bx1 && ey1 < by2 && ey2 > by1;
+      }
+
+      function drawEditorLayers() {
+        eCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
+        const items = annotationsPerPage[currentPageNum] || [];
+
+        items.forEach((el) => {
+          eCtx.strokeStyle = el.color;
+          eCtx.fillStyle = el.color;
+          eCtx.lineWidth = el.size;
+          eCtx.lineCap = "round";
+          eCtx.lineJoin = "round";
+
+          if (el.type === "rect") {
+            eCtx.strokeRect(el.x, el.y, el.w, el.h);
+          } else if (el.type === "whiteout") {
+            eCtx.fillStyle = el.color; // 保持されているel.colorを使って塗りつぶし
+            eCtx.fillRect(el.x, el.y, el.w, el.h);
+          } else if (el.type === "free") {
+            if (el.points.length < 2) return;
+            eCtx.beginPath();
+            eCtx.moveTo(el.points[0].x, el.points[0].y);
+            for (let i = 1; i < el.points.length; i++) {
+              eCtx.lineTo(el.points[i].x, el.points[i].y);
+            }
+            eCtx.stroke();
+          } else if (el.type === "text") {
+            eCtx.font = `${el.size * 1.5}px sans-serif`;
+            eCtx.textBaseline = "top";
+            eCtx.fillText(el.text, el.x, el.y);
+          }
+
+          // 選択された各要素の周囲に、青い破線のガイド（枠）を描画
+          if (selectedElements.some((sel) => sel.id === el.id)) {
+            eCtx.save();
+            eCtx.strokeStyle = "#2563eb"; // よりはっきりした青に変更
+            eCtx.lineWidth = 1.5;
+            eCtx.setLineDash([4, 3]);
+
+            let bx = el.x,
+              by = el.y,
+              bw = 0,
+              bh = 0;
+            if (el.type === "text") {
+              bw = el.text.length * el.size * 0.95;
+              bh = el.size * 1.5;
+            } else if (el.type === "rect" || el.type === "whiteout") {
+              bx = Math.min(el.x, el.x + el.w) - 4;
+              by = Math.min(el.y, el.y + el.h) - 4;
+              bw = Math.abs(el.w) + 8;
+              bh = Math.abs(el.h) + 8;
+            } else if (el.type === "free") {
+              const xs = el.points.map((p) => p.x);
+              const ys = el.points.map((p) => p.y);
+              const minX = Math.min(...xs) - 6;
+              const maxX = Math.max(...xs) + 6;
+              const minY = Math.min(...ys) - 6;
+              const maxY = Math.max(...ys) + 6;
+              bx = minX;
+              by = minY;
+              bw = maxX - minX;
+              bh = maxY - minY;
+            }
+            eCtx.strokeRect(bx, by, bw, bh);
+            eCtx.restore();
+          }
+        });
+
+        // 範囲ドラッグ選択ボックスのプレビュー表示
+        if (isDragSelecting) {
+          eCtx.save();
+          eCtx.strokeStyle = "rgba(37, 99, 235, 0.85)"; // Tailwind blue-600
+          eCtx.fillStyle = "rgba(37, 99, 235, 0.08)";
+          eCtx.lineWidth = 1.5;
+          eCtx.setLineDash([5, 3]);
+          const x = dragSelectStartX;
+          const y = dragSelectStartY;
+          const w = dragSelectEndX - dragSelectStartX;
+          const h = dragSelectEndY - dragSelectStartY;
+          eCtx.fillRect(x, y, w, h);
+          eCtx.strokeRect(x, y, w, h);
+          eCtx.restore();
+        }
+      }
+
+      function undo() {
+        if (
+          annotationsPerPage[currentPageNum] &&
+          annotationsPerPage[currentPageNum].length > 0
+        ) {
+          annotationsPerPage[currentPageNum].pop();
+          selectedElements = [];
+          updateDeleteButtonVisibility();
+          drawEditorLayers();
+        } else {
+          showToast("このページには戻せる操作がありません。");
+        }
+      }
+
+      // モーダルダイアログ
+      function clearCurrentPage() {
+        showCustomConfirm(
+          "このページに書き込んだ内容をすべて削除しますか？",
+          () => {
+            annotationsPerPage[currentPageNum] = [];
+            selectedElements = [];
+            updateDeleteButtonVisibility();
+            drawEditorLayers();
+          },
+        );
+      }
+
+      // 選択されたすべての要素を一括削除する機能
       function deleteSelected() {
         if (selectedElements.length === 0) return;
         const items = annotationsPerPage[currentPageNum] || [];
@@ -1189,6 +1096,7 @@
         showToast("選択した要素を削除しました。");
       }
 
+      // 削除ボタンの表示制御
       function updateDeleteButtonVisibility() {
         const deleteBtn = document.getElementById("deleteSelectedBtn");
         if (selectedElements.length > 0) {
@@ -1200,18 +1108,24 @@
         }
       }
 
-      // 要素のコピー
+      // 要素のコピー処理 (Ctrl + C / Cmd + C)
       function copyElements() {
         if (selectedElements.length === 0) return;
+
+        // ディープコピーを作成し、選択状態を複製バッファに保存
         copiedElements = selectedElements.map((el) => {
           if (el.type === "free") {
-            return { ...el, points: el.points.map((pt) => ({ ...pt })) };
+            return {
+              ...el,
+              points: el.points.map((pt) => ({ ...pt })),
+            };
           }
           return { ...el };
         });
         showToast(`${copiedElements.length}個の要素をコピーしました。`);
       }
 
+      // 要素の貼り付け処理 (Ctrl + V / Cmd + V)
       function pasteElements() {
         if (copiedElements.length === 0) {
           showToast("コピーされた要素がありません。");
@@ -1219,21 +1133,19 @@
         }
 
         const items = annotationsPerPage[currentPageNum] || [];
-        const offset = 20;
+        const offset = 20; // 貼り付け時に重ねて見づらくならないよう、少しだけ座標をズラす
 
         const pasted = copiedElements.map((el) => {
           const newId = Date.now() + Math.random().toString(36).substr(2, 5);
-          let newEl = { ...el, id: newId };
+          let newEl = {
+            ...el,
+            id: newId,
+          };
           if (newEl.type === "free") {
             newEl.points = el.points.map((pt) => ({
               x: pt.x + offset,
               y: pt.y + offset,
             }));
-          } else if (newEl.type === "line") {
-            newEl.x1 += offset;
-            newEl.y1 += offset;
-            newEl.x2 += offset;
-            newEl.y2 += offset;
           } else {
             newEl.x += offset;
             newEl.y += offset;
@@ -1241,9 +1153,10 @@
           return newEl;
         });
 
+        // ページannotationリストへ反映
         pasted.forEach((el) => items.push(el));
 
-        // 次の連続コピー用に座標を進める
+        // 連続で貼り付けたときにズレながら積み重なるよう、コピーバッファ自体の保存座標も更新
         copiedElements = copiedElements.map((el) => {
           let newEl = { ...el };
           if (newEl.type === "free") {
@@ -1251,11 +1164,6 @@
               x: pt.x + offset,
               y: pt.y + offset,
             }));
-          } else if (newEl.type === "line") {
-            newEl.x1 += offset;
-            newEl.y1 += offset;
-            newEl.x2 += offset;
-            newEl.y2 += offset;
           } else {
             newEl.x += offset;
             newEl.y += offset;
@@ -1263,6 +1171,7 @@
           return newEl;
         });
 
+        // 貼り付けた複製要素を、すぐにまとめて動かせるよう自動的に選択状態にする
         selectedElements = pasted;
         updateDeleteButtonVisibility();
         drawEditorLayers();
@@ -1271,9 +1180,54 @@
         );
       }
 
+      // キーボードショートカット対応
+      window.addEventListener("keydown", (e) => {
+        // 文字入力フォームがアクティブ（フォーカス状態）の時は、全体のショートカットを動かさないようにする
+        if (document.activeElement.tagName === "INPUT") return;
+
+        // 1. 削除系キー（Delete / Backspace）
+        if (e.key === "Delete" || e.key === "Backspace") {
+          if (selectedElements.length > 0) {
+            deleteSelected();
+          }
+        }
+
+        // 2. 元に戻す（Ctrl + Z / Cmd + Z）
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+          e.preventDefault(); // ブラウザ標準の戻る挙動を防止
+          undo();
+        }
+
+        // 3. コピー (Ctrl + C / Cmd + C)
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+          if (selectedElements.length > 0) {
+            e.preventDefault();
+            copyElements();
+          }
+        }
+
+        // 4. 貼り付け (Ctrl + V / Cmd + V)
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+          e.preventDefault();
+          pasteElements();
+        }
+      });
+
+      function getEventPos(e) {
+        const rect = editorCanvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+          x: clientX - rect.left,
+          y: clientY - rect.top,
+        };
+      }
+
+      // 文字要素を再編集するための処理
       function editTextElement(el) {
         if (document.querySelector(".text-input-popup")) return;
 
+        // 編集開始時に一旦描画リストから取り除いて、入力枠が重なるのを防ぎます
         const items = annotationsPerPage[currentPageNum] || [];
         const idx = items.indexOf(el);
         if (idx !== -1) {
@@ -1293,6 +1247,7 @@
 
         document.getElementById("canvasParent").appendChild(input);
 
+        // すぐに書き換えられるよう、自動フォーカス＆全選択をします
         setTimeout(() => {
           input.focus();
           input.select();
@@ -1308,8 +1263,8 @@
           const textVal = input.value.trim();
           if (textVal !== "") {
             el.text = textVal;
-            items.push(el);
-            selectedElements = [el];
+            items.push(el); // 編集した内容をリストに再追加
+            selectedElements = [el]; // 再度選択状態に
             updateDeleteButtonVisibility();
           }
           input.remove();
@@ -1318,8 +1273,13 @@
 
         input.addEventListener("blur", finishEdit);
         input.addEventListener("keydown", (ke) => {
-          if (ke.isComposing || ke.keyCode === 229) return;
-          if (ke.key === "Enter") input.blur();
+          // 日本語変換（IME）確定時のEnterキー（Composing中）は入力を完了しない
+          if (ke.isComposing || ke.keyCode === 229) {
+            return;
+          }
+          if (ke.key === "Enter") {
+            input.blur();
+          }
         });
       }
 
@@ -1330,66 +1290,51 @@
 
         const color = colorPicker.value;
         const size = parseInt(sizeSlider.value);
-        const opacity = parseInt(opacitySlider.value) / 100; // 不透明度を取得
 
-        // 1. スポイト処理
+        // 1. スポイトツールのピクセル色取得処理
         if (currentTool === "picker") {
           e.preventDefault();
+
+          // pdfCanvas上の実際の描画座標にスケール換算
           const canvasX = (pos.x / editorCanvas.width) * pdfCanvas.width;
           const canvasY = (pos.y / editorCanvas.height) * pdfCanvas.height;
 
           try {
+            // 背景PDF層のコンテキストからクリック位置のピクセルデータを取得
             const pixel = pCtx.getImageData(canvasX, canvasY, 1, 1).data;
+
+            // アルファ値(不透明度)が0の場合は透明（白）とみなして処理
             const hexColor =
               pixel[3] === 0
                 ? "#ffffff"
                 : rgbToHex(pixel[0], pixel[1], pixel[2]);
+
+            // ★ 塗りつぶし（文字消し）用の記憶色をスポイトで取得した色に更新
             toolColors.whiteout = hexColor;
+
+            // カラーピッカーの値と表示テキストを更新
             colorPicker.value = hexColor;
             document.getElementById("currentColorText").textContent =
               "吸い取った背景色";
+
             showToast(`まわりの色を吸い取りました: ${hexColor}`);
+
+            // 吸い取ったあと、すぐ次の操作ができるように自動で「文字消し(塗りつぶし)」ツールに切り替え
             setTool("whiteout");
           } catch (err) {
+            console.error("色取得に失敗しました", err);
             showToast("PDF領域内から色を取得できませんでした。");
           }
           return;
         }
 
-        // 2. 選択移動処理
+        // 2. 選択・移動モードの処理（複数選択対応）
         if (currentTool === "select") {
-          if (
-            selectedElements.length === 1 &&
-            (selectedElements[0].type === "rect" ||
-              selectedElements[0].type === "whiteout" ||
-              selectedElements[0].type === "line")
-          ) {
-            const handle = getHandleAt(selectedElements[0], pos.x, pos.y);
-            if (handle) {
-              isResizing = true;
-              activeHandle = handle;
-              dragStartX = pos.x;
-              dragStartY = pos.y;
-
-              const el = selectedElements[0];
-              if (el.type === "line") {
-                resizeOrigX = el.x1;
-                resizeOrigY = el.y1;
-                resizeOrigW = el.x2;
-                resizeOrigH = el.y2;
-              } else {
-                resizeOrigX = el.x;
-                resizeOrigY = el.y;
-                resizeOrigW = el.w;
-                resizeOrigH = el.h;
-              }
-              return;
-            }
-          }
-
           const found = findElementAt(pos.x, pos.y);
           if (found) {
+            // 要素をクリックした場合
             if (e.shiftKey) {
+              // Shiftキー押下時は複数選択トグル
               const idx = selectedElements.findIndex(
                 (el) => el.id === found.id,
               );
@@ -1399,11 +1344,12 @@
                 selectedElements.push(found);
               }
             } else {
+              // 通常クリック時、すでに選択されているグループの中のひとつをクリックしたならグループ全体を保持してドラッグ開始
               const isAlreadySelected = selectedElements.some(
                 (el) => el.id === found.id,
               );
               if (!isAlreadySelected) {
-                selectedElements = [found];
+                selectedElements = [found]; // 選択範囲をこれ1つに絞る
               }
             }
 
@@ -1411,6 +1357,7 @@
             dragStartX = pos.x;
             dragStartY = pos.y;
 
+            // 選択リストの先頭要素のカラー・太さをサイドメニューバーに同期反映
             const primarySel = selectedElements[0];
             if (primarySel.color) {
               colorPicker.value = primarySel.color;
@@ -1420,15 +1367,12 @@
               sizeSlider.value = primarySel.size;
               sizeValueDisplay.textContent = `${primarySel.size} px`;
             }
-            if (primarySel.opacity !== undefined) {
-              opacitySlider.value = Math.round(primarySel.opacity * 100);
-              opacityValueDisplay.textContent = `${Math.round(primarySel.opacity * 100)} %`;
-            } else {
-              opacitySlider.value = 100;
-              opacityValueDisplay.textContent = "100 %";
-            }
           } else {
-            if (!e.shiftKey) selectedElements = [];
+            // 何もない場所をクリックした場合
+            if (!e.shiftKey) {
+              selectedElements = []; // 選択解除
+            }
+            // ドラッグ矩形範囲選択モードを開始
             isDragSelecting = true;
             dragSelectStartX = pos.x;
             dragSelectStartY = pos.y;
@@ -1440,7 +1384,7 @@
           return;
         }
 
-        // 3. 文字入れ処理
+        // 3. 文字入れモードの処理（入力のバグと位置ズレを防ぐためイベントを完全分離）
         if (currentTool === "text") {
           e.preventDefault();
           e.stopPropagation();
@@ -1457,8 +1401,10 @@
 
           document.getElementById("canvasParent").appendChild(input);
 
+          // 確実にフォーカスを持たせる
           setTimeout(() => input.focus(), 50);
 
+          // 入力フォーム上でのクリックイベントがキャンバスに邪魔されないようにガード
           input.addEventListener("mousedown", (ie) => ie.stopPropagation());
           input.addEventListener("touchstart", (ie) => ie.stopPropagation());
 
@@ -1475,7 +1421,6 @@
                 text: textVal,
                 color: color,
                 size: size,
-                opacity: opacity,
               });
               drawEditorLayers();
             }
@@ -1483,13 +1428,18 @@
           });
 
           input.addEventListener("keydown", (ke) => {
-            if (ke.isComposing || ke.keyCode === 229) return;
-            if (ke.key === "Enter") input.blur();
+            // 日本語変換（IME）確定時のEnterキー（Composing中）は入力を完了しない
+            if (ke.isComposing || ke.keyCode === 229) {
+              return;
+            }
+            if (ke.key === "Enter") {
+              input.blur();
+            }
           });
           return;
         }
 
-        // 4. フリーハンド他
+        // 4. その他の手書き・図形描画モード
         isDrawing = true;
         const newId = Date.now() + Math.random().toString(36).substr(2, 5);
         if (currentTool === "free") {
@@ -1498,7 +1448,6 @@
             type: "free",
             color: color,
             size: size,
-            opacity: opacity,
             points: [{ x: startX, y: startY }],
           };
         }
@@ -1509,102 +1458,19 @@
         const curX = pos.x;
         const curY = pos.y;
 
+        // 選択モード中の挙動（複数ドラッグ移動 ＆ ドラッグ範囲選択ボックス更新）
         if (currentTool === "select") {
-          if (isResizing && selectedElements.length === 1) {
-            const dx = curX - dragStartX;
-            const dy = curY - dragStartY;
-            const el = selectedElements[0];
-
-            if (el.type === "line") {
-              if (activeHandle === "L1") {
-                let targetX = curX;
-                let targetY = curY;
-                if (e.shiftKey) {
-                  const theta = Math.atan2(curY - el.y2, curX - el.x2);
-                  const snappedTheta =
-                    Math.round(theta / (Math.PI / 4)) * (Math.PI / 4);
-                  const dist = Math.hypot(curX - el.x2, curY - el.y2);
-                  targetX = el.x2 + dist * Math.cos(snappedTheta);
-                  targetY = el.y2 + dist * Math.sin(snappedTheta);
-                }
-                el.x1 = targetX;
-                el.y1 = targetY;
-              } else if (activeHandle === "L2") {
-                let targetX = curX;
-                let targetY = curY;
-                if (e.shiftKey) {
-                  const theta = Math.atan2(curY - el.y1, curX - el.x1);
-                  const snappedTheta =
-                    Math.round(theta / (Math.PI / 4)) * (Math.PI / 4);
-                  const dist = Math.hypot(curX - el.x1, curY - el.y1);
-                  targetX = el.x1 + dist * Math.cos(snappedTheta);
-                  targetY = el.y1 + dist * Math.sin(snappedTheta);
-                }
-                el.x2 = targetX;
-                el.y2 = targetY;
-              }
-            } else {
-              let x1 = resizeOrigX;
-              let y1 = resizeOrigY;
-              let x2 = resizeOrigX + resizeOrigW;
-              let y2 = resizeOrigY + resizeOrigH;
-
-              switch (activeHandle) {
-                case "TL":
-                  x1 += dx;
-                  y1 += dy;
-                  break;
-                case "TR":
-                  x2 += dx;
-                  y1 += dy;
-                  break;
-                case "BL":
-                  x1 += dx;
-                  y2 += dy;
-                  break;
-                case "BR":
-                  x2 += dx;
-                  y2 += dy;
-                  break;
-                case "TC":
-                  y1 += dy;
-                  break;
-                case "BC":
-                  y2 += dy;
-                  break;
-                case "LC":
-                  x1 += dx;
-                  break;
-                case "RC":
-                  x2 += dx;
-                  break;
-              }
-
-              el.x = x1;
-              el.y = y1;
-              el.w = x2 - x1;
-              el.h = y2 - y1;
-            }
-
-            drawEditorLayers();
-            return;
-          }
-
           if (isDraggingElement && selectedElements.length > 0) {
             const dx = curX - dragStartX;
             const dy = curY - dragStartY;
 
+            // 選択されたすべての要素を一括して並行移動
             selectedElements.forEach((sel) => {
               if (sel.type === "free") {
                 sel.points.forEach((pt) => {
                   pt.x += dx;
                   pt.y += dy;
                 });
-              } else if (sel.type === "line") {
-                sel.x1 += dx;
-                sel.y1 += dy;
-                sel.x2 += dx;
-                sel.y2 += dy;
               } else {
                 sel.x += dx;
                 sel.y += dy;
@@ -1618,52 +1484,17 @@
             dragSelectEndX = curX;
             dragSelectEndY = curY;
             drawEditorLayers();
-          } else {
-            if (selectedElements.length === 1) {
-              const el = selectedElements[0];
-              const handle = getHandleAt(el, curX, curY);
-              if (handle) {
-                if (el.type === "line") {
-                  editorCanvas.style.cursor = "crosshair";
-                } else {
-                  switch (handle) {
-                    case "TL":
-                    case "BR":
-                      editorCanvas.style.cursor = "nwse-resize";
-                      break;
-                    case "TR":
-                    case "BL":
-                      editorCanvas.style.cursor = "nesw-resize";
-                      break;
-                    case "TC":
-                    case "BC":
-                      editorCanvas.style.cursor = "ns-resize";
-                      break;
-                    case "LC":
-                    case "RC":
-                      editorCanvas.style.cursor = "ew-resize";
-                      break;
-                  }
-                }
-                return;
-              }
-            }
-            const found = findElementAt(curX, curY);
-            editorCanvas.style.cursor = found ? "move" : "default";
           }
           return;
         }
 
         if (!isDrawing) return;
 
-        drawEditorLayers();
+        drawEditorLayers(); // プレビューの再描画
 
         const color = colorPicker.value;
         const size = parseInt(sizeSlider.value);
-        const opacity = parseInt(opacitySlider.value) / 100;
 
-        eCtx.save();
-        eCtx.globalAlpha = opacity;
         eCtx.strokeStyle = color;
         eCtx.fillStyle = color;
         eCtx.lineWidth = size;
@@ -1672,22 +1503,8 @@
 
         if (currentTool === "rect") {
           eCtx.strokeRect(startX, startY, curX - startX, curY - startY);
-        } else if (currentTool === "line") {
-          let drawEndX = curX;
-          let drawEndY = curY;
-          if (e.shiftKey) {
-            const theta = Math.atan2(curY - startY, curX - startX);
-            const snappedTheta =
-              Math.round(theta / (Math.PI / 4)) * (Math.PI / 4);
-            const dist = Math.hypot(curX - startX, curY - startY);
-            drawEndX = startX + dist * Math.cos(snappedTheta);
-            drawEndY = startY + dist * Math.sin(snappedTheta);
-          }
-          eCtx.beginPath();
-          eCtx.moveTo(startX, startY);
-          eCtx.lineTo(drawEndX, drawEndY);
-          eCtx.stroke();
         } else if (currentTool === "whiteout") {
+          eCtx.fillStyle = color; // 選択カラーを使用
           eCtx.fillRect(startX, startY, curX - startX, curY - startY);
         } else if (currentTool === "free") {
           currentFreehandPath.points.push({ x: curX, y: curY });
@@ -1704,46 +1521,36 @@
           }
           eCtx.stroke();
         }
-        eCtx.restore();
       }
 
       function endAction(e) {
         if (currentTool === "select") {
-          if (isResizing) {
-            isResizing = false;
-            activeHandle = null;
-            const el = selectedElements[0];
-            if (el && el.type !== "line") {
-              if (el.w < 0) {
-                el.x = el.x + el.w;
-                el.w = Math.abs(el.w);
-              }
-              if (el.h < 0) {
-                el.y = el.y + el.h;
-                el.h = Math.abs(el.h);
-              }
-            }
-            drawEditorLayers();
-            return;
-          }
-
           isDraggingElement = false;
           if (isDragSelecting) {
             isDragSelecting = false;
+
+            // ボックスの左上と右下の座標を算出
             const bx1 = Math.min(dragSelectStartX, dragSelectEndX);
             const bx2 = Math.max(dragSelectStartX, dragSelectEndX);
             const by1 = Math.min(dragSelectStartY, dragSelectEndY);
             const by2 = Math.max(dragSelectStartY, dragSelectEndY);
 
-            if (bx2 - bx1 > 5 || by2 - by1 > 5) {
+            // 単なる誤クリックや微小なズレ（5px未満）を誤選択としないガード処理
+            const width = bx2 - bx1;
+            const height = by2 - by1;
+            if (width > 5 || height > 5) {
               const items = annotationsPerPage[currentPageNum] || [];
+              // ボックス内部の要素を抽出
               const newlySelected = items.filter((el) =>
                 isElementInBox(el, bx1, bx2, by1, by2),
               );
+
               if (e.shiftKey) {
+                // Shiftキー押下中の場合は、重複なく既存の選択リストへ合体（マージ）
                 newlySelected.forEach((el) => {
-                  if (!selectedElements.some((s) => s.id === el.id))
+                  if (!selectedElements.some((s) => s.id === el.id)) {
                     selectedElements.push(el);
+                  }
                 });
               } else {
                 selectedElements = newlySelected;
@@ -1764,7 +1571,6 @@
 
         const color = colorPicker.value;
         const size = parseInt(sizeSlider.value);
-        const opacity = parseInt(opacitySlider.value) / 100;
         const newId = Date.now() + Math.random().toString(36).substr(2, 5);
 
         if (currentTool === "rect" || currentTool === "whiteout") {
@@ -1777,29 +1583,6 @@
             h: endY - startY,
             color: color,
             size: size,
-            opacity: opacity,
-          });
-        } else if (currentTool === "line") {
-          let drawEndX = endX;
-          let drawEndY = endY;
-          if (e.shiftKey) {
-            const theta = Math.atan2(endY - startY, endX - startX);
-            const snappedTheta =
-              Math.round(theta / (Math.PI / 4)) * (Math.PI / 4);
-            const dist = Math.hypot(endX - startX, endY - startY);
-            drawEndX = startX + dist * Math.cos(snappedTheta);
-            drawEndY = startY + dist * Math.sin(snappedTheta);
-          }
-          annotationsPerPage[currentPageNum].push({
-            id: newId,
-            type: "line",
-            x1: startX,
-            y1: startY,
-            x2: drawEndX,
-            y2: drawEndY,
-            color: color,
-            size: size,
-            opacity: opacity,
           });
         } else if (currentTool === "free") {
           annotationsPerPage[currentPageNum].push(currentFreehandPath);
@@ -1807,7 +1590,7 @@
         drawEditorLayers();
       }
 
-      // イベント登録
+      // イベントの登録
       editorCanvas.addEventListener("mousedown", startAction);
       editorCanvas.addEventListener("mousemove", moveAction);
       editorCanvas.addEventListener("mouseup", endAction);
@@ -1837,13 +1620,17 @@
         { passive: false },
       );
 
+      // 「選択・位置の移動」ツール中にダブルクリックされた際の処理
       editorCanvas.addEventListener("dblclick", (e) => {
         if (currentTool !== "select") return;
         const pos = getEventPos(e);
         const found = findElementAt(pos.x, pos.y);
-        if (found && found.type === "text") editTextElement(found);
+        if (found && found.type === "text") {
+          editTextElement(found);
+        }
       });
 
+      // Base64文字列を安全にUint8Array（バイナリ）に変換する関数
       function base64ToUint8Array(base64) {
         const raw = window.atob(base64);
         const rawLength = raw.length;
@@ -1872,10 +1659,6 @@
         const scaleY = (pdfHeight * scaleFactor) / viewHeight;
 
         items.forEach((el) => {
-          tCtx.save();
-          // PDF出力層にも個別に設定された「不透明度」を完全に反映
-          tCtx.globalAlpha = el.opacity !== undefined ? el.opacity : 1.0;
-
           tCtx.strokeStyle = el.color;
           tCtx.fillStyle = el.color;
           tCtx.lineWidth = el.size * scaleX;
@@ -1897,16 +1680,8 @@
               el.w * scaleX,
               el.h * scaleY,
             );
-          } else if (el.type === "line") {
-            tCtx.beginPath();
-            tCtx.moveTo(el.x1 * scaleX, el.y1 * scaleY);
-            tCtx.lineTo(el.x2 * scaleX, el.y2 * scaleY);
-            tCtx.stroke();
           } else if (el.type === "free") {
-            if (el.points.length < 2) {
-              tCtx.restore();
-              return;
-            }
+            if (el.points.length < 2) return;
             tCtx.beginPath();
             tCtx.moveTo(el.points[0].x * scaleX, el.points[0].y * scaleY);
             for (let i = 1; i < el.points.length; i++) {
@@ -1914,12 +1689,11 @@
             }
             tCtx.stroke();
           } else if (el.type === "text") {
+            // PDFの実サイズ（高解像度）に合わせて文字サイズを拡大描画し、画面表示と完全に一致させます
             tCtx.font = `${el.size * 1.5 * scaleY}px sans-serif`;
             tCtx.textBaseline = "top";
             tCtx.fillText(el.text, el.x * scaleX, el.y * scaleY);
           }
-
-          tCtx.restore();
         });
 
         return tempCanvas.toDataURL("image/png");
