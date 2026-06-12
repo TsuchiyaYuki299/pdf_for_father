@@ -1,0 +1,2026 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>かんたんPDF書き込み・編集ツール</title>
+    <!-- Tailwind CSS (デザイン調整用) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDFの描画と編集用ライブラリ -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <style>
+      .custom-shadow {
+        box-shadow:
+          0 10px 30px -10px rgba(0, 0, 0, 0.1),
+          0 1px 3px rgba(0, 0, 0, 0.05);
+      }
+      /* 選択移動モードの時はカーソルを移動アイコンにする */
+      .cursor-move-mode {
+        cursor: move !important;
+      }
+      /* スポイトモードの時は十字/セルカーソルにする */
+      .cursor-picker-mode {
+        cursor: cell !important;
+      }
+
+      /* 選択されたアクティブなツールのスタイル */
+      .btn-tool-active-blue {
+        background-color: #2563eb !important; /* bg-blue-600 */
+        color: #ffffff !important; /* text-white */
+        border-color: #2563eb !important; /* border-blue-600 */
+      }
+      /* アクティブ時はアイコンのグレー色も強制的に白にします */
+      .btn-tool-active-blue svg {
+        color: #ffffff !important;
+      }
+
+      .btn-tool-active-red {
+        background-color: #dc2626 !important; /* bg-red-600 */
+        color: #ffffff !important; /* text-white */
+        border-color: #dc2626 !important; /* border-red-600 */
+      }
+      .btn-tool-active-red svg {
+        color: #ffffff !important;
+      }
+    </style>
+  </head>
+  <body
+    class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans select-none"
+  >
+    <!-- ヘッダー -->
+    <header
+      class="bg-white border-b border-slate-200 py-4 px-6 sticky top-0 z-40"
+    >
+      <div
+        class="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4"
+      >
+        <div class="flex items-center gap-3">
+          <div class="bg-blue-600 text-white p-2 rounded-lg">
+            <svg
+              class="w-6 h-6"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+              />
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-xl font-bold text-slate-900">
+              かんたんPDF書き込み・編集ツール
+            </h1>
+            <p class="text-xs text-slate-500">
+              文字や図形の書き込み、移動、背景色に合わせた文字消しがスムーズに行えます
+            </p>
+          </div>
+        </div>
+        <!-- メッセージ通知領域 -->
+        <div
+          id="toastMessage"
+          class="hidden px-4 py-2 bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-lg transition-all duration-300"
+        ></div>
+      </div>
+    </header>
+
+    <main
+      class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-6"
+    >
+      <!-- PDF未ロード時のアップロードエリア -->
+      <div
+        id="uploadZone"
+        class="flex-1 flex flex-col items-center justify-center border-3 border-dashed border-slate-300 bg-white rounded-2xl p-10 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/30 transition-all custom-shadow min-h-[400px]"
+      >
+        <div class="bg-slate-100 p-6 rounded-full text-slate-400 mb-4">
+          <svg
+            class="w-12 h-12"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            />
+          </svg>
+        </div>
+        <h3 class="text-lg font-bold text-slate-700 mb-2">
+          PDFファイルをここにドラッグ＆ドロップ
+        </h3>
+        <p class="text-sm text-slate-400 mb-6">
+          または、ここをクリックしてパソコンからファイルを選択してください
+        </p>
+        <button
+          class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-md shadow-blue-200"
+        >
+          ファイルを選択する
+        </button>
+      </div>
+      <!-- 無限ループを防ぐため、クリック検知エリアの外に配置 -->
+      <input
+        type="file"
+        id="fileInput"
+        accept="application/pdf"
+        class="hidden"
+      />
+
+      <!-- 編集メイン画面 -->
+      <div
+        id="editorWorkspace"
+        class="hidden flex-1 flex flex-col lg:flex-row gap-6"
+      >
+        <!-- サイドメニューバー (ツール群) -->
+        <div
+          class="lg:w-72 lg:sticky lg:top-24 bg-white rounded-2xl p-5 border border-slate-200 flex flex-col gap-5 h-fit custom-shadow"
+        >
+          <div>
+            <h4
+              class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3"
+            >
+              編集ツールの選択
+            </h4>
+            <div class="grid grid-cols-1 gap-2">
+              <button
+                onclick="setTool('select')"
+                id="tool-select"
+                class="btn-tool flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-sm font-semibold transition-all bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                <svg
+                  class="w-5 h-5 text-slate-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
+                  />
+                </svg>
+                <span>選択・位置の移動</span>
+              </button>
+              <button
+                onclick="setTool('text')"
+                id="tool-text"
+                class="btn-tool flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-sm font-semibold transition-all bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                <svg
+                  class="w-5 h-5 text-slate-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  />
+                </svg>
+                <span>文字の書き込み</span>
+              </button>
+              <button
+                onclick="setTool('rect')"
+                id="tool-rect"
+                class="btn-tool flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-sm font-semibold transition-all bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                <svg
+                  class="w-5 h-5 text-slate-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5z"
+                  />
+                </svg>
+                <span>四角形を描く</span>
+              </button>
+              <!-- 直線を描くツール -->
+              <button
+                onclick="setTool('line')"
+                id="tool-line"
+                class="btn-tool flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-sm font-semibold transition-all bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                <svg
+                  class="w-5 h-5 text-slate-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 20L20 4"
+                  />
+                </svg>
+                <span>直線を描く</span>
+              </button>
+              <button
+                onclick="setTool('free')"
+                id="tool-free"
+                class="btn-tool flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-sm font-semibold transition-all bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                <svg
+                  class="w-5 h-5 text-slate-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                  />
+                </svg>
+                <span>ペン（手書き）</span>
+              </button>
+
+              <!-- スポイトツール -->
+              <button
+                onclick="setTool('picker')"
+                id="tool-picker"
+                class="btn-tool flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-sm font-semibold transition-all bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                <svg
+                  class="w-5 h-5 text-slate-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19.414 4.586a2 2 0 00-2.828 0L7 14.172V17h2.828l9.586-9.586a2 2 0 000-2.828zM7 14.172L10.172 17M14 8l3 3"
+                  />
+                </svg>
+                <span>スポイト（背景色を吸い取る）</span>
+              </button>
+
+              <!-- 塗りつぶし消しゴム -->
+              <button
+                onclick="setTool('whiteout')"
+                id="tool-whiteout"
+                class="btn-tool flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-sm font-semibold transition-all bg-white border-slate-200 text-red-600 hover:bg-red-50/50"
+              >
+                <svg
+                  class="w-5 h-5 text-red-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
+                </svg>
+                <span>塗りつぶし（文字消し）</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 太さ・色調整 -->
+          <div class="border-t border-slate-100 pt-4 flex flex-col gap-4">
+            <div>
+              <div
+                class="flex justify-between text-xs font-bold text-slate-400 mb-2"
+              >
+                <span>ペンの色 / 文字 / 塗りつぶしの色</span>
+                <span id="currentColorText" class="text-slate-600">黒</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <input
+                  type="color"
+                  id="colorPicker"
+                  value="#000000"
+                  class="w-10 h-10 border-0 rounded-lg cursor-pointer bg-transparent"
+                />
+                <div class="flex flex-wrap gap-1.5">
+                  <button
+                    onclick="quickColor('#ef4444', '赤')"
+                    class="w-6 h-6 rounded-full bg-[#ef4444] border border-black/10"
+                  ></button>
+                  <button
+                    onclick="quickColor('#3b82f6', '青')"
+                    class="w-6 h-6 rounded-full bg-[#3b82f6] border border-black/10"
+                  ></button>
+                  <button
+                    onclick="quickColor('#10b981', '緑')"
+                    class="w-6 h-6 rounded-full bg-[#10b981] border border-black/10"
+                  ></button>
+                  <button
+                    onclick="quickColor('#000000', '黒')"
+                    class="w-6 h-6 rounded-full bg-[#000000] border border-black/10"
+                  ></button>
+                  <button
+                    onclick="quickColor('#ffffff', '白')"
+                    class="w-6 h-6 rounded-full bg-[#ffffff] border border-black/10"
+                    title="白"
+                  ></button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 【新機能】直感的な不透明度調整スライダーの追加 -->
+            <div>
+              <div
+                class="flex justify-between text-xs font-bold text-slate-400 mb-1"
+              >
+                <span>色の不透明度 (透け具合)</span>
+                <span id="opacityValue" class="text-slate-600">100 %</span>
+              </div>
+              <input
+                type="range"
+                id="opacitySlider"
+                min="10"
+                max="100"
+                value="100"
+                class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+            </div>
+
+            <div>
+              <div
+                class="flex justify-between text-xs font-bold text-slate-400 mb-1"
+              >
+                <span>太さ / 文字サイズ</span>
+                <span id="sizeValue" class="text-slate-600">12 px</span>
+              </div>
+              <input
+                type="range"
+                id="sizeSlider"
+                min="1"
+                max="60"
+                value="12"
+                class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+            </div>
+          </div>
+
+          <!-- アクション -->
+          <div class="border-t border-slate-100 pt-4 flex flex-col gap-2">
+            <!-- 選択したものの削除ボタン -->
+            <button
+              id="deleteSelectedBtn"
+              onclick="deleteSelected()"
+              class="hidden items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl border border-red-200 text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 transition-all"
+            >
+              <svg
+                class="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
+              </svg>
+              <span>選択した要素を削除</span>
+            </button>
+
+            <button
+              onclick="undo()"
+              class="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 transition-all"
+            >
+              <svg
+                class="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                />
+              </svg>
+              <span>ひとつ戻す (Undo)</span>
+            </button>
+            <button
+              onclick="clearCurrentPage()"
+              class="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl border border-dashed border-red-200 text-sm font-semibold text-red-500 bg-white hover:bg-red-50 transition-all"
+            >
+              <span>このページの書き込みを全部消す</span>
+            </button>
+          </div>
+
+          <!-- 便利なショートカットガイド -->
+          <div
+            class="border-t border-slate-100 pt-4 text-[11px] text-slate-500 leading-normal"
+          >
+            <span class="font-bold text-slate-600 block mb-1"
+              >便利なキーボード操作</span
+            >
+            <ul class="space-y-1 pl-1 list-disc list-inside">
+              <li>
+                <kbd class="bg-slate-100 px-1 border rounded text-[10px]"
+                  >Ctrl</kbd
+                >
+                +
+                <kbd class="bg-slate-100 px-1 border rounded text-[10px]"
+                  >C</kbd
+                >
+                : コピー
+              </li>
+              <li>
+                <kbd class="bg-slate-100 px-1 border rounded text-[10px]"
+                  >Ctrl</kbd
+                >
+                +
+                <kbd class="bg-slate-100 px-1 border rounded text-[10px]"
+                  >V</kbd
+                >
+                : 貼り付け
+              </li>
+              <li>
+                <kbd class="bg-slate-100 px-1 border rounded text-[10px]"
+                  >Ctrl</kbd
+                >
+                +
+                <kbd class="bg-slate-100 px-1 border rounded text-[10px]"
+                  >Z</kbd
+                >
+                : 元に戻す
+              </li>
+              <li>
+                <kbd class="bg-slate-100 px-1 border rounded text-[10px]"
+                  >Delete</kbd
+                >
+                : 選択要素を消去
+              </li>
+              <li class="leading-snug">
+                <kbd class="bg-slate-100 px-1 border rounded text-[10px]"
+                  >Shift</kbd
+                >
+                + クリック、または範囲ドラッグで複数選択可能
+              </li>
+              <li class="leading-snug">
+                <kbd class="bg-slate-100 px-1 border rounded text-[10px]"
+                  >Shift</kbd
+                >
+                + 直線描画で45度ピタッとスナップ
+              </li>
+            </ul>
+          </div>
+
+          <!-- ダウンロード保存ボタン -->
+          <button
+            onclick="savePDF()"
+            class="mt-4 flex items-center justify-center gap-2 w-full px-4 py-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-all shadow-md shadow-emerald-100"
+          >
+            <svg
+              class="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              />
+            </svg>
+            <span>編集したPDFを保存する</span>
+          </button>
+        </div>
+
+        <!-- キャンバスプレビューエリア -->
+        <div class="flex-1 flex flex-col gap-4">
+          <!-- ページめくりコントロール -->
+          <div
+            class="bg-white border border-slate-200 px-6 py-3 rounded-2xl flex justify-between items-center custom-shadow"
+          >
+            <div class="flex items-center gap-2">
+              <button
+                id="prevPageBtn"
+                onclick="changePage(-1)"
+                class="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                <svg
+                  class="w-5 h-5 text-slate-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+              </button>
+              <span class="text-sm font-semibold text-slate-700">
+                ページ: <span id="pageCurrent">1</span> /
+                <span id="pageTotal">1</span>
+              </span>
+              <button
+                id="nextPageBtn"
+                onclick="changePage(1)"
+                class="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                <svg
+                  class="w-5 h-5 text-slate-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
+            </div>
+            <div
+              class="text-xs text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 font-medium"
+            >
+              ※「選択・位置の移動」ツールで文字をダブルクリックすると修正できます
+            </div>
+          </div>
+
+          <!-- 実際のキャンバス本体 -->
+          <div
+            class="flex-1 overflow-auto bg-slate-300 rounded-2xl p-4 flex justify-center items-start min-h-[500px] border border-slate-200 shadow-inner"
+          >
+            <div
+              id="canvasParent"
+              class="relative bg-white shadow-2xl rounded"
+              style="width: fit-content"
+            >
+              <!-- 背景のPDFレンダリング層 -->
+              <canvas id="pdfCanvas" class="block rounded shadow-sm"></canvas>
+              <!-- 編集の手書き/テキスト層 -->
+              <canvas
+                id="editorCanvas"
+                class="absolute top-0 left-0 cursor-crosshair rounded"
+              ></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- カスタム確認用ダイアログ -->
+    <div
+      id="confirmModal"
+      class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+    >
+      <div
+        class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-slate-100 flex flex-col gap-4 transform scale-100 transition-all"
+      >
+        <div class="flex items-center gap-3 text-red-600">
+          <svg
+            class="w-6 h-6"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+            />
+          </svg>
+          <h3 class="text-lg font-bold text-slate-900">消去の確認</h3>
+        </div>
+        <p
+          id="confirmModalMessage"
+          class="text-sm text-slate-600 leading-relaxed"
+        >
+          このページに書き込んだ内容をすべて削除しますか?
+        </p>
+        <div class="flex justify-end gap-3 mt-2">
+          <button
+            id="confirmCancelBtn"
+            class="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all"
+          >
+            キャンセル
+          </button>
+          <button
+            id="confirmOkBtn"
+            class="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-xs font-bold text-white transition-all shadow-md shadow-red-100"
+          >
+            すべて消去する
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // pdf.js の初期化
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js";
+
+      let pdfDoc = null;
+      let rawPdfBytes = null;
+      let currentTool = "select";
+      let isDrawing = false;
+      let startX = 0,
+        startY = 0;
+
+      // 選択・移動のための状態管理
+      let selectedElements = []; // 複数選択に対応
+      let isDraggingElement = false;
+      let dragStartX = 0;
+      let dragStartY = 0;
+
+      // リサイズのための状態管理
+      let isResizing = false;
+      let activeHandle = null;
+      let resizeOrigX = 0,
+        resizeOrigY = 0,
+        resizeOrigW = 0,
+        resizeOrigH = 0;
+
+      // ドラッグ範囲選択ボックス用の状態管理
+      let isDragSelecting = false;
+      let dragSelectStartX = 0;
+      let dragSelectStartY = 0;
+      let dragSelectEndX = 0;
+      let dragSelectEndY = 0;
+
+      // コピーした要素を保持するバッファ
+      let copiedElements = [];
+
+      // ツールごとの「前回使った色」を記憶するオブジェクト
+      const toolColors = {
+        text: "#000000", // 文字の書き込み（デフォルト：黒）
+        rect: "#000000", // 四角形（デフォルト：黒）
+        line: "#000000", // 直線（デフォルト：黒）
+        free: "#000000", // 手書きペン（デフォルト：黒）
+        whiteout: "#ffffff", // 塗りつぶし消しゴム（デフォルト：白）
+      };
+
+      // 【新機能】ツールごとの「前回使った不透明度」を記憶するオブジェクト
+      const toolOpacities = {
+        text: 1.0,
+        rect: 1.0,
+        line: 1.0,
+        free: 1.0,
+        whiteout: 1.0,
+      };
+
+      // ページごとの編集データを保持するオブジェクト
+      const annotationsPerPage = {};
+      const pageViewportSizes = {};
+
+      let currentPageNum = 1;
+      let totalPages = 1;
+      let currentFreehandPath = null;
+
+      const pdfCanvas = document.getElementById("pdfCanvas");
+      const editorCanvas = document.getElementById("editorCanvas");
+      const pCtx = pdfCanvas.getContext("2d");
+      const eCtx = editorCanvas.getContext("2d");
+
+      const colorPicker = document.getElementById("colorPicker");
+      const sizeSlider = document.getElementById("sizeSlider");
+      const sizeValueDisplay = document.getElementById("sizeValue");
+
+      // 【新機能】不透明度スライダー要素の取得
+      const opacitySlider = document.getElementById("opacitySlider");
+      const opacityValueDisplay = document.getElementById("opacityValue");
+
+      // 点(px, py)と線分(x1, y1)-(x2, y2)の最短距離の二乗を計算する関数（直線クリック検知用）
+      function getSqSegDist(px, py, x1, y1, x2, y2) {
+        let dx = x2 - x1;
+        let dy = y2 - y1;
+        if (dx !== 0 || dy !== 0) {
+          let t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
+          if (t > 1) {
+            x1 = x2;
+            y1 = y2;
+          } else if (t > 0) {
+            x1 += dx * t;
+            y1 += dy * t;
+          }
+        }
+        dx = px - x1;
+        dy = py - y1;
+        return dx * dx + dy * dy;
+      }
+
+      // 【新機能】不透明度スライダーの値が手動で変更された場合のイベント処理
+      opacitySlider.addEventListener("input", (e) => {
+        const newOpacity = parseInt(e.target.value) / 100;
+        opacityValueDisplay.textContent = `${e.target.value} %`;
+
+        // 現在アクティブなツールの記憶不透明度を更新
+        if (toolOpacities[currentTool] !== undefined) {
+          toolOpacities[currentTool] = newOpacity;
+        }
+
+        // 選択中の要素があれば即座に不透明度を反映
+        if (selectedElements.length > 0) {
+          selectedElements.forEach((el) => {
+            el.opacity = newOpacity;
+          });
+          drawEditorLayers();
+        }
+      });
+
+      // カラーピッカーの値が手動で変更された場合のイベント処理
+      colorPicker.addEventListener("input", (e) => {
+        const newColor = e.target.value;
+
+        // 現在のツールの記憶色を変更
+        if (toolColors[currentTool] !== undefined) {
+          toolColors[currentTool] = newColor;
+        }
+
+        updateColorDisplayText(newColor);
+
+        if (selectedElements.length > 0) {
+          selectedElements.forEach((el) => {
+            el.color = newColor;
+            // 選択された要素のタイプに応じた記憶色もアップデート
+            if (toolColors[el.type] !== undefined) {
+              toolColors[el.type] = newColor;
+            }
+          });
+          drawEditorLayers();
+        }
+      });
+
+      // 太さ・サイズの変更表示および選択要素への即時反映
+      sizeSlider.addEventListener("input", (e) => {
+        const newSize = parseInt(e.target.value);
+        sizeValueDisplay.textContent = `${newSize} px`;
+        if (selectedElements.length > 0) {
+          selectedElements.forEach((el) => {
+            el.size = newSize;
+          });
+          drawEditorLayers();
+        }
+      });
+
+      // ファイルドロップまたはクリックでPDFの読み込み
+      const uploadZone = document.getElementById("uploadZone");
+      const fileInput = document.getElementById("fileInput");
+
+      // ボックス枠内がクリックされたときにファイル選択画面を起動
+      uploadZone.addEventListener("click", (e) => {
+        // 子要素のボタンなど、クリックターゲットが何であっても1度だけトリガーする設計（イベント無限連鎖のバグを完全解消！）
+        if (e.target !== fileInput) {
+          fileInput.click();
+        }
+      });
+
+      fileInput.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) loadPdfFile(file);
+      });
+
+      // クイック色選択ボタン押下時の処理
+      function quickColor(hex, name) {
+        colorPicker.value = hex;
+        document.getElementById("currentColorText").textContent = name;
+
+        // 現在アクティブなツールの記憶色を更新
+        if (toolColors[currentTool] !== undefined) {
+          toolColors[currentTool] = hex;
+        }
+
+        // 選択中の要素があれば即座に色を変更
+        if (selectedElements.length > 0) {
+          selectedElements.forEach((el) => {
+            el.color = hex;
+            // 選択中の要素のタイプに応じた記憶色もアップデート
+            if (toolColors[el.type] !== undefined) {
+              toolColors[el.type] = hex;
+            }
+          });
+          drawEditorLayers();
+        }
+      }
+
+      // RGB値をHEX文字列（#ffffff形式）に変換する補助関数
+      function rgbToHex(r, g, b) {
+        return (
+          "#" +
+          [r, g, b]
+            .map((x) => {
+              const hex = x.toString(16);
+              return hex.length === 1 ? "0" + hex : hex;
+            })
+            .join("")
+        );
+      }
+
+      // カラー表示のテキスト更新処理
+      const colorNames = {
+        "#ef4444": "赤",
+        "#3b82f6": "青",
+        "#10b981": "緑",
+        "#000000": "黒",
+        "#ffffff": "白",
+      };
+      function updateColorDisplayText(hex) {
+        const text = colorNames[hex.toLowerCase()] || "カスタム色";
+        document.getElementById("currentColorText").textContent = text;
+      }
+
+      // 描画レイヤーの更新（キャンバス上の全要素の再描画）
+      function drawEditorLayers() {
+        eCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
+        const items = annotationsPerPage[currentPageNum] || [];
+
+        items.forEach((el) => {
+          // コンテキストの不透明度を設定（蛍光ペンのような透かし表示に対応）
+          eCtx.save();
+          eCtx.globalAlpha = el.opacity !== undefined ? el.opacity : 1.0;
+
+          eCtx.strokeStyle = el.color;
+          eCtx.fillStyle = el.color;
+          eCtx.lineWidth = el.size;
+          eCtx.lineCap = "round";
+          eCtx.lineJoin = "round";
+
+          if (el.type === "rect") {
+            eCtx.strokeRect(el.x, el.y, el.w, el.h);
+          } else if (el.type === "whiteout") {
+            eCtx.fillStyle = el.color; // 保持されているel.colorを使って塗りつぶし
+            eCtx.fillRect(el.x, el.y, el.w, el.h);
+          } else if (el.type === "line") {
+            // 直線の描画
+            eCtx.beginPath();
+            eCtx.moveTo(el.x1, el.y1);
+            eCtx.lineTo(el.x2, el.y2);
+            eCtx.stroke();
+          } else if (el.type === "free") {
+            if (el.points.length < 2) {
+              eCtx.restore();
+              return;
+            }
+            eCtx.beginPath();
+            eCtx.moveTo(el.points[0].x, el.points[0].y);
+            for (let i = 1; i < el.points.length; i++) {
+              eCtx.lineTo(el.points[i].x, el.points[i].y);
+            }
+            eCtx.stroke();
+          } else if (el.type === "text") {
+            eCtx.font = `${el.size * 1.5}px sans-serif`;
+            eCtx.textBaseline = "top";
+            eCtx.fillText(el.text, el.x, el.y);
+          }
+
+          eCtx.restore(); // 不透明度の設定を復旧
+
+          // 選択された各要素の周囲に、青い破線のガイド（枠）を描画
+          if (selectedElements.some((sel) => sel.id === el.id)) {
+            eCtx.save();
+            eCtx.strokeStyle = "#2563eb"; // よりはっきりした青
+            eCtx.lineWidth = 1.5;
+            eCtx.setLineDash([4, 3]);
+
+            let bx = el.x,
+              by = el.y,
+              bw = 0,
+              bh = 0;
+            if (el.type === "text") {
+              bw = el.text.length * el.size * 0.95;
+              bh = el.size * 1.5;
+            } else if (el.type === "rect" || el.type === "whiteout") {
+              bx = Math.min(el.x, el.x + el.w) - 4;
+              by = Math.min(el.y, el.y + el.h) - 4;
+              bw = Math.abs(el.w) + 8;
+              bh = Math.abs(el.h) + 8;
+            } else if (el.type === "line") {
+              // 直線選択時のバウンディング枠
+              bx = Math.min(el.x1, el.x2) - 4;
+              by = Math.min(el.y1, el.y2) - 4;
+              bw = Math.abs(el.x1 - el.x2) + 8;
+              bh = Math.abs(el.y1 - el.y2) + 8;
+            } else if (el.type === "free") {
+              const xs = el.points.map((p) => p.x);
+              const ys = el.points.map((p) => p.y);
+              const minX = Math.min(...xs) - 6;
+              const maxX = Math.max(...xs) + 6;
+              const minY = Math.min(...ys) - 6;
+              const maxY = Math.max(...ys) + 6;
+              bx = minX;
+              by = minY;
+              bw = maxX - minX;
+              bh = maxY - minY;
+            }
+            eCtx.strokeRect(bx, by, bw, bh);
+            eCtx.restore();
+
+            // 四角形（矩形・塗りつぶし）が単一選択されている場合にリサイズハンドル（8箇所）を描画
+            if (
+              selectedElements.length === 1 &&
+              (el.type === "rect" || el.type === "whiteout")
+            ) {
+              const handleSize = 7;
+              const x1 = Math.min(el.x, el.x + el.w);
+              const x2 = Math.max(el.x, el.x + el.w);
+              const y1 = Math.min(el.y, el.y + el.h);
+              const y2 = Math.max(el.y, el.y + el.h);
+              const cx = (x1 + x2) / 2;
+              const cy = (y1 + y2) / 2;
+
+              const handleCoords = [
+                { x: x1, y: y1 }, // TL
+                { x: x2, y: y1 }, // TR
+                { x: x1, y: y2 }, // BL
+                { x: x2, y: y2 }, // BR
+                { x: cx, y: y1 }, // TC
+                { x: cx, y: y2 }, // BC
+                { x: x1, y: cy }, // LC
+                { x: x2, y: cy }, // RC
+              ];
+
+              eCtx.save();
+              eCtx.fillStyle = "#ffffff";
+              eCtx.strokeStyle = "#2563eb";
+              eCtx.lineWidth = 1.5;
+
+              handleCoords.forEach((h) => {
+                eCtx.fillRect(
+                  h.x - handleSize / 2,
+                  h.y - handleSize / 2,
+                  handleSize,
+                  handleSize,
+                );
+                eCtx.strokeRect(
+                  h.x - handleSize / 2,
+                  h.y - handleSize / 2,
+                  handleSize,
+                  handleSize,
+                );
+              });
+              eCtx.restore();
+            }
+
+            // 直線が単一選択されている場合に両端のリサイズハンドルを描画
+            if (selectedElements.length === 1 && el.type === "line") {
+              const handleSize = 7;
+              eCtx.save();
+              eCtx.fillStyle = "#ffffff";
+              eCtx.strokeStyle = "#2563eb";
+              eCtx.lineWidth = 1.5;
+
+              const points = [
+                { x: el.x1, y: el.y1 }, // 始点
+                { x: el.x2, y: el.y2 }, // 終点
+              ];
+
+              points.forEach((p) => {
+                eCtx.fillRect(
+                  p.x - handleSize / 2,
+                  p.y - handleSize / 2,
+                  handleSize,
+                  handleSize,
+                );
+                eCtx.strokeRect(
+                  p.x - handleSize / 2,
+                  p.y - handleSize / 2,
+                  handleSize,
+                  handleSize,
+                );
+              });
+              eCtx.restore();
+            }
+          }
+        });
+
+        // 範囲ドラッグ選択ボックスのプレビュー表示
+        if (isDragSelecting) {
+          eCtx.save();
+          eCtx.strokeStyle = "rgba(37, 99, 235, 0.85)"; // Tailwind blue-600
+          eCtx.fillStyle = "rgba(37, 99, 235, 0.08)";
+          eCtx.lineWidth = 1.5;
+          eCtx.setLineDash([5, 3]);
+          const x = dragSelectStartX;
+          const y = dragSelectStartY;
+          const w = dragSelectEndX - dragSelectStartX;
+          const h = dragSelectEndY - dragSelectStartY;
+          eCtx.fillRect(x, y, w, h);
+          eCtx.strokeRect(x, y, w, h);
+          eCtx.restore();
+        }
+      }
+
+      // ツールのトグル処理（ホバーとの色の競合を完全に防ぎます）
+      function setTool(toolName) {
+        currentTool = toolName;
+
+        // すべてのボタンからアクティブ（選択中）のスタイルクラスを一旦取り除く
+        document.querySelectorAll(".btn-tool").forEach((btn) => {
+          btn.classList.remove("btn-tool-active-blue", "btn-tool-active-red");
+        });
+
+        const activeBtn = document.getElementById(`tool-${toolName}`);
+        if (activeBtn) {
+          // 新しく選択されたツールに応じたクラスを追加する
+          if (toolName === "whiteout") {
+            activeBtn.classList.add("btn-tool-active-red");
+          } else {
+            activeBtn.classList.add("btn-tool-active-blue");
+          }
+        }
+
+        // ツール選択によるカーソル切り替え
+        if (toolName === "select") {
+          editorCanvas.classList.add("cursor-move-mode");
+          editorCanvas.classList.remove("cursor-picker-mode");
+        } else if (toolName === "picker") {
+          editorCanvas.classList.add("cursor-picker-mode");
+          editorCanvas.classList.remove("cursor-move-mode");
+        } else {
+          editorCanvas.classList.remove(
+            "cursor-move-mode",
+            "cursor-picker-mode",
+          );
+        }
+
+        // すべてのツールでカラーピッカーを常に有効化
+        colorPicker.disabled = false;
+
+        // 切り替え先ツールに記憶されている色を呼び出して設定
+        if (toolColors[toolName] !== undefined) {
+          const savedColor = toolColors[toolName];
+          colorPicker.value = savedColor;
+          updateColorDisplayText(savedColor);
+        }
+
+        // 【新機能】切り替え先ツールに記憶されている不透明度を呼び出して設定
+        if (toolOpacities[toolName] !== undefined) {
+          const savedOpacity = toolOpacities[toolName];
+          opacitySlider.value = Math.round(savedOpacity * 100);
+          opacityValueDisplay.textContent = `${Math.round(savedOpacity * 100)} %`;
+        }
+
+        // 選択移動・スポイトツール以外に切り替えた場合は選択表示を消す
+        if (toolName !== "select") {
+          selectedElements = [];
+          updateDeleteButtonVisibility();
+          drawEditorLayers();
+        }
+      }
+
+      // キャンバス上の要素を検知する関数
+      function findElementAt(x, y) {
+        const items = annotationsPerPage[currentPageNum] || [];
+        // クリックした位置の手前（配列の最後尾）にある要素から優先的に探す
+        for (let i = items.length - 1; i >= 0; i--) {
+          const el = items[i];
+          if (el.type === "text") {
+            const textWidth = el.text.length * el.size * 0.95;
+            const textHeight = el.size * 1.5;
+            if (
+              x >= el.x &&
+              x <= el.x + textWidth &&
+              y >= el.y &&
+              y <= el.y + textHeight
+            ) {
+              return el;
+            }
+          } else if (el.type === "rect" || el.type === "whiteout") {
+            const x1 = Math.min(el.x, el.x + el.w);
+            const x2 = Math.max(el.x, el.x + el.w);
+            const y1 = Math.min(el.y, el.y + el.h);
+            const y2 = Math.max(el.y, el.y + el.h);
+            if (x >= x1 && x <= x2 && y >= y1 && y <= y2) {
+              return el;
+            }
+          } else if (el.type === "line") {
+            // 直線要素のクリック判定
+            const sqDist = getSqSegDist(x, y, el.x1, el.y1, el.x2, el.y2);
+            if (sqDist < 100) {
+              // 10の二乗 = 100
+              return el;
+            }
+          } else if (el.type === "free") {
+            // 手書き線の場合、いずれかの点とクリック位置が近ければ検出
+            for (const pt of el.points) {
+              const dist = Math.hypot(pt.x - x, pt.y - y);
+              if (dist < 15) {
+                return el;
+              }
+            }
+          }
+        }
+        return null;
+      }
+
+      // 要素がドラッグ範囲選択ボックスに入っているか判定する関数
+      function isElementInBox(el, bx1, bx2, by1, by2) {
+        let ex1, ex2, ey1, ey2;
+        if (el.type === "text") {
+          const textWidth = el.text.length * el.size * 0.95;
+          const textHeight = el.size * 1.5;
+          ex1 = el.x;
+          ex2 = el.x + textWidth;
+          ey1 = el.y;
+          ey2 = el.y + textHeight;
+        } else if (el.type === "rect" || el.type === "whiteout") {
+          ex1 = Math.min(el.x, el.x + el.w);
+          ex2 = Math.max(el.x, el.x + el.w);
+          ey1 = Math.min(el.y, el.y + el.h);
+          ey2 = Math.max(el.y, el.y + el.h);
+        } else if (el.type === "line") {
+          ex1 = Math.min(el.x1, el.x2);
+          ex2 = Math.max(el.x1, el.x2);
+          ey1 = Math.min(el.y1, el.y2);
+          ey2 = Math.max(el.y1, el.y2);
+        } else if (el.type === "free") {
+          const xs = el.points.map((p) => p.x);
+          const ys = el.points.map((p) => p.y);
+          ex1 = Math.min(...xs);
+          ex2 = Math.max(...xs);
+          ey1 = Math.min(...ys);
+          ey2 = Math.max(...ys);
+        }
+
+        return ex1 < bx2 && ex2 > bx1 && ey1 < by2 && ey2 > by1;
+      }
+
+      // 指定された座標にあるリサイズハンドルを検出する関数
+      function getHandleAt(el, x, y) {
+        const clickTolerance = 10; // 押しやすいよう、判定の広さを少し広めに確保します
+
+        if (el.type === "line") {
+          // 直線の場合は始点と終点のハンドルを検出
+          if (Math.hypot(el.x1 - x, el.y1 - y) <= clickTolerance) return "L1";
+          if (Math.hypot(el.x2 - x, el.y2 - y) <= clickTolerance) return "L2";
+          return null;
+        }
+
+        const x1 = Math.min(el.x, el.x + el.w);
+        const x2 = Math.max(el.x, el.x + el.w);
+        const y1 = Math.min(el.y, el.y + el.h);
+        const y2 = Math.max(el.y, el.y + el.h);
+        const cx = (x1 + x2) / 2;
+        const cy = (y1 + y2) / 2;
+
+        const handles = {
+          TL: { x: x1, y: y1 },
+          TR: { x: x2, y: y1 },
+          BL: { x: x1, y: y2 },
+          BR: { x: x2, y: y2 },
+          TC: { x: cx, y: y1 },
+          BC: { x: cx, y: y2 },
+          LC: { x: x1, y: cy },
+          RC: { x: x2, y: cy },
+        };
+
+        for (const key in handles) {
+          const h = handles[key];
+          if (Math.hypot(h.x - x, h.y - y) <= clickTolerance) {
+            return key;
+          }
+        }
+        return null;
+      }
+
+      // 選択された要素を削除
+      function deleteSelected() {
+        if (selectedElements.length === 0) return;
+        const items = annotationsPerPage[currentPageNum] || [];
+        selectedElements.forEach((sel) => {
+          const index = items.findIndex((el) => el.id === sel.id);
+          if (index !== -1) {
+            items.splice(index, 1);
+          }
+        });
+        selectedElements = [];
+        updateDeleteButtonVisibility();
+        drawEditorLayers();
+        showToast("選択した要素を削除しました。");
+      }
+
+      function updateDeleteButtonVisibility() {
+        const deleteBtn = document.getElementById("deleteSelectedBtn");
+        if (selectedElements.length > 0) {
+          deleteBtn.classList.remove("hidden");
+          deleteBtn.classList.add("flex");
+        } else {
+          deleteBtn.classList.remove("flex");
+          deleteBtn.classList.add("hidden");
+        }
+      }
+
+      // 要素のコピー
+      function copyElements() {
+        if (selectedElements.length === 0) return;
+        copiedElements = selectedElements.map((el) => {
+          if (el.type === "free") {
+            return { ...el, points: el.points.map((pt) => ({ ...pt })) };
+          }
+          return { ...el };
+        });
+        showToast(`${copiedElements.length}個の要素をコピーしました。`);
+      }
+
+      // 要素の貼り付け
+      function pasteElements() {
+        if (copiedElements.length === 0) {
+          showToast("コピーされた要素がありません。");
+          return;
+        }
+
+        const items = annotationsPerPage[currentPageNum] || [];
+        const offset = 20;
+
+        const pasted = copiedElements.map((el) => {
+          const newId = Date.now() + Math.random().toString(36).substr(2, 5);
+          let newEl = { ...el, id: newId };
+          if (newEl.type === "free") {
+            newEl.points = el.points.map((pt) => ({
+              x: pt.x + offset,
+              y: pt.y + offset,
+            }));
+          } else if (newEl.type === "line") {
+            newEl.x1 += offset;
+            newEl.y1 += offset;
+            newEl.x2 += offset;
+            newEl.y2 += offset;
+          } else {
+            newEl.x += offset;
+            newEl.y += offset;
+          }
+          return newEl;
+        });
+
+        pasted.forEach((el) => items.push(el));
+
+        // 次の連続コピー用に座標を進める
+        copiedElements = copiedElements.map((el) => {
+          let newEl = { ...el };
+          if (newEl.type === "free") {
+            newEl.points = el.points.map((pt) => ({
+              x: pt.x + offset,
+              y: pt.y + offset,
+            }));
+          } else if (newEl.type === "line") {
+            newEl.x1 += offset;
+            newEl.y1 += offset;
+            newEl.x2 += offset;
+            newEl.y2 += offset;
+          } else {
+            newEl.x += offset;
+            newEl.y += offset;
+          }
+          return newEl;
+        });
+
+        selectedElements = pasted;
+        updateDeleteButtonVisibility();
+        drawEditorLayers();
+        showToast(
+          `${pasted.length}個の要素を貼り付けました。そのまま移動できます。`,
+        );
+      }
+
+      // 文字要素の再編集処理
+      function editTextElement(el) {
+        if (document.querySelector(".text-input-popup")) return;
+
+        const items = annotationsPerPage[currentPageNum] || [];
+        const idx = items.indexOf(el);
+        if (idx !== -1) {
+          items.splice(idx, 1);
+        }
+        selectedElements = [];
+        updateDeleteButtonVisibility();
+        drawEditorLayers();
+
+        const input = document.createElement("input");
+        input.className =
+          "text-input-popup absolute border-2 border-blue-500 rounded px-1.5 py-0.5 outline-none bg-white/95 z-50 text-slate-800 shadow-md";
+        input.style.left = `${el.x}px`;
+        input.style.top = `${el.y}px`;
+        input.style.fontSize = `${el.size * 1.5}px`;
+        input.value = el.text;
+
+        document.getElementById("canvasParent").appendChild(input);
+
+        setTimeout(() => {
+          input.focus();
+          input.select();
+        }, 50);
+
+        input.addEventListener("mousedown", (ie) => ie.stopPropagation());
+        input.addEventListener("touchstart", (ie) => ie.stopPropagation());
+
+        let finished = false;
+        const finishEdit = () => {
+          if (finished) return;
+          finished = true;
+          const textVal = input.value.trim();
+          if (textVal !== "") {
+            el.text = textVal;
+            items.push(el);
+            selectedElements = [el];
+            updateDeleteButtonVisibility();
+          }
+          input.remove();
+          drawEditorLayers();
+        };
+
+        input.addEventListener("blur", finishEdit);
+        input.addEventListener("keydown", (ke) => {
+          if (ke.isComposing || ke.keyCode === 229) return;
+          if (ke.key === "Enter") input.blur();
+        });
+      }
+
+      // マウス・タッチ操作イベント定義
+      function startAction(e) {
+        const pos = getEventPos(e);
+        startX = pos.x;
+        startY = pos.y;
+
+        const color = colorPicker.value;
+        const size = parseInt(sizeSlider.value);
+        const opacity = parseInt(opacitySlider.value) / 100; // 不透明度を取得
+
+        // 1. スポイト処理
+        if (currentTool === "picker") {
+          e.preventDefault();
+          const canvasX = (pos.x / editorCanvas.width) * pdfCanvas.width;
+          const canvasY = (pos.y / editorCanvas.height) * pdfCanvas.height;
+
+          try {
+            const pixel = pCtx.getImageData(canvasX, canvasY, 1, 1).data;
+            const hexColor =
+              pixel[3] === 0
+                ? "#ffffff"
+                : rgbToHex(pixel[0], pixel[1], pixel[2]);
+            toolColors.whiteout = hexColor;
+            colorPicker.value = hexColor;
+            document.getElementById("currentColorText").textContent =
+              "吸い取った背景色";
+            showToast(`まわりの色を吸い取りました: ${hexColor}`);
+            setTool("whiteout");
+          } catch (err) {
+            showToast("PDF領域内から色を取得できませんでした。");
+          }
+          return;
+        }
+
+        // 2. 選択移動処理
+        if (currentTool === "select") {
+          if (
+            selectedElements.length === 1 &&
+            (selectedElements[0].type === "rect" ||
+              selectedElements[0].type === "whiteout" ||
+              selectedElements[0].type === "line")
+          ) {
+            const handle = getHandleAt(selectedElements[0], pos.x, pos.y);
+            if (handle) {
+              isResizing = true;
+              activeHandle = handle;
+              dragStartX = pos.x;
+              dragStartY = pos.y;
+
+              const el = selectedElements[0];
+              if (el.type === "line") {
+                resizeOrigX = el.x1;
+                resizeOrigY = el.y1;
+                resizeOrigW = el.x2;
+                resizeOrigH = el.y2;
+              } else {
+                resizeOrigX = el.x;
+                resizeOrigY = el.y;
+                resizeOrigW = el.w;
+                resizeOrigH = el.h;
+              }
+              return;
+            }
+          }
+
+          const found = findElementAt(pos.x, pos.y);
+          if (found) {
+            if (e.shiftKey) {
+              const idx = selectedElements.findIndex(
+                (el) => el.id === found.id,
+              );
+              if (idx !== -1) {
+                selectedElements.splice(idx, 1);
+              } else {
+                selectedElements.push(found);
+              }
+            } else {
+              const isAlreadySelected = selectedElements.some(
+                (el) => el.id === found.id,
+              );
+              if (!isAlreadySelected) {
+                selectedElements = [found];
+              }
+            }
+
+            isDraggingElement = true;
+            dragStartX = pos.x;
+            dragStartY = pos.y;
+
+            const primarySel = selectedElements[0];
+            if (primarySel.color) {
+              colorPicker.value = primarySel.color;
+              updateColorDisplayText(primarySel.color);
+            }
+            if (primarySel.size) {
+              sizeSlider.value = primarySel.size;
+              sizeValueDisplay.textContent = `${primarySel.size} px`;
+            }
+            // 【新機能】選択した要素の不透明度をスライダーに反映
+            if (primarySel.opacity !== undefined) {
+              opacitySlider.value = Math.round(primarySel.opacity * 100);
+              opacityValueDisplay.textContent = `${Math.round(primarySel.opacity * 100)} %`;
+            } else {
+              opacitySlider.value = 100;
+              opacityValueDisplay.textContent = "100 %";
+            }
+          } else {
+            if (!e.shiftKey) selectedElements = [];
+            isDragSelecting = true;
+            dragSelectStartX = pos.x;
+            dragSelectStartY = pos.y;
+            dragSelectEndX = pos.x;
+            dragSelectEndY = pos.y;
+          }
+          updateDeleteButtonVisibility();
+          drawEditorLayers();
+          return;
+        }
+
+        // 3. 文字入れ処理
+        if (currentTool === "text") {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (document.querySelector(".text-input-popup")) return;
+
+          const input = document.createElement("input");
+          input.className =
+            "text-input-popup absolute border-2 border-blue-500 rounded px-1.5 py-0.5 outline-none bg-white/95 z-50 text-slate-800 shadow-md";
+          input.style.left = `${pos.x}px`;
+          input.style.top = `${pos.y}px`;
+          input.style.fontSize = `${size * 1.5}px`;
+          input.placeholder = "文字を入力...";
+
+          document.getElementById("canvasParent").appendChild(input);
+
+          setTimeout(() => input.focus(), 50);
+
+          input.addEventListener("mousedown", (ie) => ie.stopPropagation());
+          input.addEventListener("touchstart", (ie) => ie.stopPropagation());
+
+          input.addEventListener("blur", () => {
+            const textVal = input.value.trim();
+            if (textVal !== "") {
+              const newId =
+                Date.now() + Math.random().toString(36).substr(2, 5);
+              annotationsPerPage[currentPageNum].push({
+                id: newId,
+                type: "text",
+                x: startX,
+                y: startY,
+                text: textVal,
+                color: color,
+                size: size,
+                opacity: opacity, // 不透明度をアノテーションデータに記録
+              });
+              drawEditorLayers();
+            }
+            input.remove();
+          });
+
+          input.addEventListener("keydown", (ke) => {
+            if (ke.isComposing || ke.keyCode === 229) return;
+            if (ke.key === "Enter") input.blur();
+          });
+          return;
+        }
+
+        // 4. フリーハンド他
+        isDrawing = true;
+        const newId = Date.now() + Math.random().toString(36).substr(2, 5);
+        if (currentTool === "free") {
+          currentFreehandPath = {
+            id: newId,
+            type: "free",
+            color: color,
+            size: size,
+            opacity: opacity, // 不透明度を記録
+            points: [{ x: startX, y: startY }],
+          };
+        }
+      }
+
+      function moveAction(e) {
+        const pos = getEventPos(e);
+        const curX = pos.x;
+        const curY = pos.y;
+
+        if (currentTool === "select") {
+          if (isResizing && selectedElements.length === 1) {
+            const dx = curX - dragStartX;
+            const dy = curY - dragStartY;
+            const el = selectedElements[0];
+
+            if (el.type === "line") {
+              if (activeHandle === "L1") {
+                let targetX = curX;
+                let targetY = curY;
+                if (e.shiftKey) {
+                  const theta = Math.atan2(curY - el.y2, curX - el.x2);
+                  const snappedTheta =
+                    Math.round(theta / (Math.PI / 4)) * (Math.PI / 4);
+                  const dist = Math.hypot(curX - el.x2, curY - el.y2);
+                  targetX = el.x2 + dist * Math.cos(snappedTheta);
+                  targetY = el.y2 + dist * Math.sin(snappedTheta);
+                }
+                el.x1 = targetX;
+                el.y1 = targetY;
+              } else if (activeHandle === "L2") {
+                let targetX = curX;
+                let targetY = curY;
+                if (e.shiftKey) {
+                  const theta = Math.atan2(curY - el.y1, curX - el.x1);
+                  const snappedTheta =
+                    Math.round(theta / (Math.PI / 4)) * (Math.PI / 4);
+                  const dist = Math.hypot(curX - el.x1, curY - el.y1);
+                  targetX = el.x1 + dist * Math.cos(snappedTheta);
+                  targetY = el.y1 + dist * Math.sin(snappedTheta);
+                }
+                el.x2 = targetX;
+                el.y2 = targetY;
+              }
+            } else {
+              let x1 = resizeOrigX;
+              let y1 = resizeOrigY;
+              let x2 = resizeOrigX + resizeOrigW;
+              let y2 = resizeOrigY + resizeOrigH;
+
+              switch (activeHandle) {
+                case "TL":
+                  x1 += dx;
+                  y1 += dy;
+                  break;
+                case "TR":
+                  x2 += dx;
+                  y1 += dy;
+                  break;
+                case "BL":
+                  x1 += dx;
+                  y2 += dy;
+                  break;
+                case "BR":
+                  x2 += dx;
+                  y2 += dy;
+                  break;
+                case "TC":
+                  y1 += dy;
+                  break;
+                case "BC":
+                  y2 += dy;
+                  break;
+                case "LC":
+                  x1 += dx;
+                  break;
+                case "RC":
+                  x2 += dx;
+                  break;
+              }
+
+              el.x = x1;
+              el.y = y1;
+              el.w = x2 - x1;
+              el.h = y2 - y1;
+            }
+
+            drawEditorLayers();
+            return;
+          }
+
+          if (isDraggingElement && selectedElements.length > 0) {
+            const dx = curX - dragStartX;
+            const dy = curY - dragStartY;
+
+            selectedElements.forEach((sel) => {
+              if (sel.type === "free") {
+                sel.points.forEach((pt) => {
+                  pt.x += dx;
+                  pt.y += dy;
+                });
+              } else if (sel.type === "line") {
+                sel.x1 += dx;
+                sel.y1 += dy;
+                sel.x2 += dx;
+                sel.y2 += dy;
+              } else {
+                sel.x += dx;
+                sel.y += dy;
+              }
+            });
+
+            dragStartX = curX;
+            dragStartY = curY;
+            drawEditorLayers();
+          } else if (isDragSelecting) {
+            dragSelectEndX = curX;
+            dragSelectEndY = curY;
+            drawEditorLayers();
+          } else {
+            if (selectedElements.length === 1) {
+              const el = selectedElements[0];
+              const handle = getHandleAt(el, curX, curY);
+              if (handle) {
+                if (el.type === "line") {
+                  editorCanvas.style.cursor = "crosshair";
+                } else {
+                  switch (handle) {
+                    case "TL":
+                    case "BR":
+                      editorCanvas.style.cursor = "nwse-resize";
+                      break;
+                    case "TR":
+                    case "BL":
+                      editorCanvas.style.cursor = "nesw-resize";
+                      break;
+                    case "TC":
+                    case "BC":
+                      editorCanvas.style.cursor = "ns-resize";
+                      break;
+                    case "LC":
+                    case "RC":
+                      editorCanvas.style.cursor = "ew-resize";
+                      break;
+                  }
+                }
+                return;
+              }
+            }
+            const found = findElementAt(curX, curY);
+            editorCanvas.style.cursor = found ? "move" : "default";
+          }
+          return;
+        }
+
+        if (!isDrawing) return;
+
+        drawEditorLayers();
+
+        const color = colorPicker.value;
+        const size = parseInt(sizeSlider.value);
+        const opacity = parseInt(opacitySlider.value) / 100;
+
+        eCtx.save();
+        eCtx.globalAlpha = opacity;
+        eCtx.strokeStyle = color;
+        eCtx.fillStyle = color;
+        eCtx.lineWidth = size;
+        eCtx.lineCap = "round";
+        eCtx.lineJoin = "round";
+
+        if (currentTool === "rect") {
+          eCtx.strokeRect(startX, startY, curX - startX, curY - startY);
+        } else if (currentTool === "line") {
+          let drawEndX = curX;
+          let drawEndY = curY;
+          if (e.shiftKey) {
+            const theta = Math.atan2(curY - startY, curX - startX);
+            const snappedTheta =
+              Math.round(theta / (Math.PI / 4)) * (Math.PI / 4);
+            const dist = Math.hypot(curX - startX, curY - startY);
+            drawEndX = startX + dist * Math.cos(snappedTheta);
+            drawEndY = startY + dist * Math.sin(snappedTheta);
+          }
+          eCtx.beginPath();
+          eCtx.moveTo(startX, startY);
+          eCtx.lineTo(drawEndX, drawEndY);
+          eCtx.stroke();
+        } else if (currentTool === "whiteout") {
+          eCtx.fillRect(startX, startY, curX - startX, curY - startY);
+        } else if (currentTool === "free") {
+          currentFreehandPath.points.push({ x: curX, y: curY });
+          eCtx.beginPath();
+          eCtx.moveTo(
+            currentFreehandPath.points[0].x,
+            currentFreehandPath.points[0].y,
+          );
+          for (let i = 1; i < currentFreehandPath.points.length; i++) {
+            eCtx.lineTo(
+              currentFreehandPath.points[i].x,
+              currentFreehandPath.points[i].y,
+            );
+          }
+          eCtx.stroke();
+        }
+        eCtx.restore();
+      }
+
+      function endAction(e) {
+        if (currentTool === "select") {
+          if (isResizing) {
+            isResizing = false;
+            activeHandle = null;
+            const el = selectedElements[0];
+            if (el && el.type !== "line") {
+              if (el.w < 0) {
+                el.x = el.x + el.w;
+                el.w = Math.abs(el.w);
+              }
+              if (el.h < 0) {
+                el.y = el.y + el.h;
+                el.h = Math.abs(el.h);
+              }
+            }
+            drawEditorLayers();
+            return;
+          }
+
+          isDraggingElement = false;
+          if (isDragSelecting) {
+            isDragSelecting = false;
+            const bx1 = Math.min(dragSelectStartX, dragSelectEndX);
+            const bx2 = Math.max(dragSelectStartX, dragSelectEndX);
+            const by1 = Math.min(dragSelectStartY, dragSelectEndY);
+            const by2 = Math.max(dragSelectStartY, dragSelectEndY);
+
+            if (bx2 - bx1 > 5 || by2 - by1 > 5) {
+              const items = annotationsPerPage[currentPageNum] || [];
+              const newlySelected = items.filter((el) =>
+                isElementInBox(el, bx1, bx2, by1, by2),
+              );
+              if (e.shiftKey) {
+                newlySelected.forEach((el) => {
+                  if (!selectedElements.some((s) => s.id === el.id))
+                    selectedElements.push(el);
+                });
+              } else {
+                selectedElements = newlySelected;
+              }
+            }
+            updateDeleteButtonVisibility();
+            drawEditorLayers();
+          }
+          return;
+        }
+
+        if (!isDrawing) return;
+        isDrawing = false;
+
+        const pos = getEventPos(e);
+        const endX = pos.x;
+        const endY = pos.y;
+
+        const color = colorPicker.value;
+        const size = parseInt(sizeSlider.value);
+        const opacity = parseInt(opacitySlider.value) / 100;
+        const newId = Date.now() + Math.random().toString(36).substr(2, 5);
+
+        if (currentTool === "rect" || currentTool === "whiteout") {
+          annotationsPerPage[currentPageNum].push({
+            id: newId,
+            type: currentTool,
+            x: startX,
+            y: startY,
+            w: endX - startX,
+            h: endY - startY,
+            color: color,
+            size: size,
+            opacity: opacity,
+          });
+        } else if (currentTool === "line") {
+          let drawEndX = endX;
+          let drawEndY = endY;
+          if (e.shiftKey) {
+            const theta = Math.atan2(endY - startY, endX - startX);
+            const snappedTheta =
+              Math.round(theta / (Math.PI / 4)) * (Math.PI / 4);
+            const dist = Math.hypot(endX - startX, endY - startY);
+            drawEndX = startX + dist * Math.cos(snappedTheta);
+            drawEndY = startY + dist * Math.sin(snappedTheta);
+          }
+          annotationsPerPage[currentPageNum].push({
+            id: newId,
+            type: "line",
+            x1: startX,
+            y1: startY,
+            x2: drawEndX,
+            y2: drawEndY,
+            color: color,
+            size: size,
+            opacity: opacity,
+          });
+        } else if (currentTool === "free") {
+          annotationsPerPage[currentPageNum].push(currentFreehandPath);
+        }
+        drawEditorLayers();
+      }
+
+      // イベント登録
+      editorCanvas.addEventListener("mousedown", startAction);
+      editorCanvas.addEventListener("mousemove", moveAction);
+      editorCanvas.addEventListener("mouseup", endAction);
+
+      editorCanvas.addEventListener(
+        "touchstart",
+        (e) => {
+          e.preventDefault();
+          startAction(e);
+        },
+        { passive: false },
+      );
+      editorCanvas.addEventListener(
+        "touchmove",
+        (e) => {
+          e.preventDefault();
+          moveAction(e);
+        },
+        { passive: false },
+      );
+      editorCanvas.addEventListener(
+        "touchend",
+        (e) => {
+          e.preventDefault();
+          endAction(e);
+        },
+        { passive: false },
+      );
+
+      editorCanvas.addEventListener("dblclick", (e) => {
+        if (currentTool !== "select") return;
+        const pos = getEventPos(e);
+        const found = findElementAt(pos.x, pos.y);
+        if (found && found.type === "text") editTextElement(found);
+      });
+
+      // 【最高画質画像合成エンジン（4倍超解像度/300DPI相当）】
+      function generateOverlayImage(
+        items,
+        pdfWidth,
+        pdfHeight,
+        viewWidth,
+        viewHeight,
+      ) {
+        const scaleFactor = 4; // 4倍高解像度化 (HDプロセッシング)
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = pdfWidth * scaleFactor;
+        tempCanvas.height = pdfHeight * scaleFactor;
+        const tCtx = tempCanvas.getContext("2d");
+
+        const scaleX = (pdfWidth * scaleFactor) / viewWidth;
+        const scaleY = (pdfHeight * scaleFactor) / viewHeight;
+
+        items.forEach((el) => {
+          tCtx.save();
+          // PDF出力層にも個別に設定された「不透明度」を完全に反映（これでにじまず・透かし付きで完全出力されます）
+          tCtx.globalAlpha = el.opacity !== undefined ? el.opacity : 1.0;
+
+          tCtx.strokeStyle = el.color;
+          tCtx.fillStyle = el.color;
+          tCtx.lineWidth = el.size * scaleX;
+          tCtx.lineCap = "round";
+          tCtx.lineJoin = "round";
+
+          if (el.type === "rect") {
+            tCtx.strokeRect(
+              el.x * scaleX,
+              el.y * scaleY,
+              el.w * scaleX,
+              el.h * scaleY,
+            );
+          } else if (el.type === "whiteout") {
+            tCtx.fillStyle = el.color; // 塗りつぶしの個別カラーを使用
+            tCtx.fillRect(
+              el.x * scaleX,
+              el.y * scaleY,
+              el.w * scaleX,
+              el.h * scaleY,
+            );
+          } else if (el.type === "line") {
+            tCtx.beginPath();
+            tCtx.moveTo(el.x1 * scaleX, el.y1 * scaleY);
+            tCtx.lineTo(el.x2 * scaleX, el.y2 * scaleY);
+            tCtx.stroke();
+          } else if (el.type === "free") {
+            if (el.points.length < 2) {
+              tCtx.restore();
+              return;
+            }
+            tCtx.beginPath();
+            tCtx.moveTo(el.points[0].x * scaleX, el.points[0].y * scaleY);
+            for (let i = 1; i < el.points.length; i++) {
+              tCtx.lineTo(el.points[i].x * scaleX, el.points[i].y * scaleY);
+            }
+            tCtx.stroke();
+          } else if (el.type === "text") {
+            tCtx.font = `${el.size * 1.5 * scaleY}px sans-serif`;
+            tCtx.textBaseline = "top";
+            tCtx.fillText(el.text, el.x * scaleX, el.y * scaleY);
+          }
+
+          tCtx.restore();
+        });
+
+        return tempCanvas.toDataURL("image/png");
+      }
+
+      async function savePDF() {
+        if (!rawPdfBytes) return;
+        showToast("PDFを加工保存しています...少々お待ちください。");
+
+        try {
+          // 安全のためにrawPdfBytesのクローン（複製）を作って読み込むことで、複数回保存したときのロック・破損を防ぎます
+          const pdfDocInstance = await PDFLib.PDFDocument.load(
+            rawPdfBytes.slice(0),
+          );
+
+          // 暗号化（パスワード保護など）されたPDFの検知
+          if (pdfDocInstance.isEncrypted) {
+            showToast(
+              "このPDFは暗号化（保護）されているため、編集して保存することができません。",
+            );
+            return;
+          }
+
+          const pages = pdfDocInstance.getPages();
+
+          for (let pNum = 1; pNum <= totalPages; pNum++) {
+            const items = annotationsPerPage[pNum];
+            if (!items || items.length === 0) continue;
+
+            // 万が一、PDFの実際のページ数を超えてアクセスしようとした場合のガード
+            if (pNum > pages.length) continue;
+
+            const targetPage = pages[pNum - 1];
+            const { width, height } = targetPage.getSize();
+            const viewSize = pageViewportSizes[pNum];
+
+            if (!viewSize) continue;
+
+            // 4倍解像度で作られた極めて鮮明な透過PNG画像を作成
+            const pngDataUrl = generateOverlayImage(
+              items,
+              width,
+              height,
+              viewSize.width,
+              viewSize.height,
+            );
+
+            // data:image/png;base64, のヘッダー文字列部分を安全に切り取ります
+            const parts = pngDataUrl.split(",");
+            if (parts.length < 2) continue;
+            const base64Data = parts[1];
+
+            // Base64文字列をバイナリ（Uint8Array）にデコードして安全に埋め込み
+            const pngBytes = base64ToUint8Array(base64Data);
+            const overlayImage = await pdfDocInstance.embedPng(pngBytes);
+
+            // PDFのページの上にピッタリ重ねて描画。文字も矢印もにじみのない完璧なクオリティで保存されます。
+            targetPage.drawImage(overlayImage, {
+              x: 0,
+              y: 0,
+              width: width,
+              height: height,
+            });
+          }
+
+          const pdfBytes = await pdfDocInstance.save();
+
+          // ファイルダウンロード
+          const blob = new Blob([pdfBytes], { type: "application/pdf" });
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = "edited_document.pdf";
+          link.click();
+
+          showToast("PDFがバッチリ保存・ダウンロードされました！");
+        } catch (err) {
+          console.error(err);
+          // エラー詳細を画面上に表示できるように改善
+          showToast("PDFの作成中にエラーが発生しました。理由: " + err.message);
+        }
+      }
+    </script>
+  </body>
+</html>
