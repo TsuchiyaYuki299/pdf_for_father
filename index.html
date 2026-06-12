@@ -76,7 +76,7 @@
               かんたんPDF書き込み・編集ツール
             </h1>
             <p class="text-xs text-slate-500">
-              文字や図形の書き込み、移動、サイズ調整、背景色に合わせた文字消しがスムーズに行えます
+              文字や図形・直線の書き込み、移動、サイズ調整、背景色に合わせた文字消しがスムーズに行えます
             </p>
           </div>
         </div>
@@ -188,6 +188,26 @@
                 <span>文字の書き込み</span>
               </button>
               <button
+                onclick="setTool('line')"
+                id="tool-line"
+                class="btn-tool flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-sm font-semibold transition-all bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                <svg
+                  class="w-5 h-5 text-slate-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M20 4L4 20"
+                  />
+                </svg>
+                <span>直線を描く</span>
+              </button>
+              <button
                 onclick="setTool('rect')"
                 id="tool-rect"
                 class="btn-tool flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-sm font-semibold transition-all bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
@@ -280,7 +300,7 @@
               <div
                 class="flex justify-between text-xs font-bold text-slate-400 mb-2"
               >
-                <span>ペンの色 / 文字 / 塗りつぶしの色</span>
+                <span>ペンの色 / 文字 / 直線 / 塗りつぶしの色</span>
                 <span id="currentColorText" class="text-slate-600">黒</span>
               </div>
               <div class="flex items-center gap-3">
@@ -433,7 +453,7 @@
                 <kbd class="bg-slate-100 px-1 border rounded text-[10px]"
                   >Shift</kbd
                 >
-                + クリック、または範囲ドラッグで複数選択可能
+                + ドラッグ: 45度スナップ / 複数選択
               </li>
             </ul>
           </div>
@@ -513,7 +533,8 @@
             <div
               class="text-xs text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 font-medium"
             >
-              ※「選択・位置とサイズ変更」ツールで青い角や辺をドラッグするとサイズを変更できます
+              ※「直線を描く」では Shift
+              キーを押しながらドラッグすると、45度スナップします。
             </div>
           </div>
 
@@ -606,7 +627,7 @@
 
       // --- リサイズ機能用状態管理 ---
       let isResizing = false;
-      let resizeHandle = null; // 'nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'
+      let resizeHandle = null; // 'nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w', 'start', 'end'
       let resizeTarget = null;
       let resizeStartRect = null;
 
@@ -622,10 +643,11 @@
 
       // ツールごとの「前回使った色」を記憶するオブジェクト
       const toolColors = {
-        text: "#000000", // 文字の書き込み（デフォルト：黒）
-        rect: "#000000", // 四角形（デフォルト：黒）
-        free: "#000000", // 手書きペン（デフォルト：黒）
-        whiteout: "#ffffff", // 塗りつぶし消しゴム（デフォルト：白）
+        text: "#000000", // 文字の書き込み
+        line: "#000000", // 直線（デフォルト：黒）
+        rect: "#000000", // 四角形
+        free: "#000000", // 手書きペン
+        whiteout: "#ffffff", // 塗りつぶし消しゴム
       };
 
       // ページごとの編集データを保持するオブジェクト
@@ -859,7 +881,7 @@
         document.getElementById("currentColorText").textContent = text;
       }
 
-      // ツールのトグル処理（ホバーとの色の競合を完全に防ぎます）
+      // ツールのトグル処理
       function setTool(toolName) {
         currentTool = toolName;
 
@@ -910,6 +932,17 @@
         }
       }
 
+      // 点と線分（始点と終点）の最短距離を求める関数
+      function getDistancePointToSegment(px, py, x1, y1, x2, y2) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const l2 = dx * dx + dy * dy;
+        if (l2 === 0) return Math.hypot(px - x1, py - y1);
+        let t = ((px - x1) * dx + (py - y1) * dy) / l2;
+        t = Math.max(0, Math.min(1, t));
+        return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+      }
+
       // キャンバス上の要素を検知する関数
       function findElementAt(x, y) {
         const items = annotationsPerPage[currentPageNum] || [];
@@ -935,6 +968,18 @@
             if (x >= x1 && x <= x2 && y >= y1 && y <= y2) {
               return el;
             }
+          } else if (el.type === "line") {
+            const dist = getDistancePointToSegment(
+              x,
+              y,
+              el.x,
+              el.y,
+              el.x + el.w,
+              el.y + el.h,
+            );
+            if (dist <= Math.max(el.size, 8)) {
+              return el;
+            }
           } else if (el.type === "free") {
             // 手書き線の場合、いずれかの点とクリック位置が近ければ検出
             for (const pt of el.points) {
@@ -958,7 +1003,11 @@
           ex2 = el.x + textWidth;
           ey1 = el.y;
           ey2 = el.y + textHeight;
-        } else if (el.type === "rect" || el.type === "whiteout") {
+        } else if (
+          el.type === "rect" ||
+          el.type === "whiteout" ||
+          el.type === "line"
+        ) {
           ex1 = Math.min(el.x, el.x + el.w);
           ex2 = Math.max(el.x, el.x + el.w);
           ey1 = Math.min(el.y, el.y + el.h);
@@ -989,8 +1038,38 @@
         }
       }
 
+      // 角度を45度単位にスナップさせた際の座標を取得する関数
+      function getSnappedPos(x1, y1, x2, y2) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const r = Math.hypot(dx, dy);
+        const theta = Math.atan2(dy, dx);
+        const snappedTheta = Math.round(theta / (Math.PI / 4)) * (Math.PI / 4);
+        return {
+          x: x1 + r * Math.cos(snappedTheta),
+          y: y1 + r * Math.sin(snappedTheta),
+        };
+      }
+
       // リサイズハンドルの位置を計算し、マウス位置がハンドル上にあるか判定する関数
       function getResizeHandleAt(mx, my, el) {
+        const threshold = 8; // ハンドルホバーの判定領域 (px)
+
+        if (el.type === "line") {
+          const x1 = el.x;
+          const y1 = el.y;
+          const x2 = el.x + el.w;
+          const y2 = el.y + el.h;
+
+          if (Math.hypot(mx - x1, my - y1) <= threshold) {
+            return { name: "start", cursor: "crosshair" };
+          }
+          if (Math.hypot(mx - x2, my - y2) <= threshold) {
+            return { name: "end", cursor: "crosshair" };
+          }
+          return null;
+        }
+
         if (el.type !== "rect" && el.type !== "whiteout") return null;
         const x = el.x;
         const y = el.y;
@@ -1008,7 +1087,6 @@
           w: { x: x, y: y + h / 2, cursor: "ew-resize" },
         };
 
-        const threshold = 8; // ハンドルホバーの判定領域 (px)
         for (const name in handles) {
           const hp = handles[name];
           if (
@@ -1032,7 +1110,12 @@
           eCtx.lineCap = "round";
           eCtx.lineJoin = "round";
 
-          if (el.type === "rect") {
+          if (el.type === "line") {
+            eCtx.beginPath();
+            eCtx.moveTo(el.x, el.y);
+            eCtx.lineTo(el.x + el.w, el.y + el.h);
+            eCtx.stroke();
+          } else if (el.type === "rect") {
             eCtx.strokeRect(el.x, el.y, el.w, el.h);
           } else if (el.type === "whiteout") {
             eCtx.fillStyle = el.color; // 保持されているel.colorを使って塗りつぶし
@@ -1065,7 +1148,11 @@
             if (el.type === "text") {
               bw = el.text.length * el.size * 0.95;
               bh = el.size * 1.5;
-            } else if (el.type === "rect" || el.type === "whiteout") {
+            } else if (
+              el.type === "rect" ||
+              el.type === "whiteout" ||
+              el.type === "line"
+            ) {
               bx = Math.min(el.x, el.x + el.w) - 4;
               by = Math.min(el.y, el.y + el.h) - 4;
               bw = Math.abs(el.w) + 8;
@@ -1085,43 +1172,62 @@
             eCtx.strokeRect(bx, by, bw, bh);
             eCtx.restore();
 
-            // 単一選択かつ rect もしくは whiteout の場合に、8箇所の調整ハンドルを描画する
-            if (
-              selectedElements.length === 1 &&
-              (el.type === "rect" || el.type === "whiteout")
-            ) {
-              eCtx.save();
-              eCtx.fillStyle = "#2563eb"; // ハンドルの内側（青）
-              eCtx.strokeStyle = "#ffffff"; // ハンドルの縁（白）
-              eCtx.lineWidth = 1.5;
-              const handleRadius = 5;
+            // 単一選択時の調節ハンドルの描画
+            if (selectedElements.length === 1) {
+              if (el.type === "rect" || el.type === "whiteout") {
+                eCtx.save();
+                eCtx.fillStyle = "#2563eb"; // ハンドルの内側（青）
+                eCtx.strokeStyle = "#ffffff"; // ハンドルの縁（白）
+                eCtx.lineWidth = 1.5;
+                const handleRadius = 5;
 
-              const hPoints = [
-                { x: el.x, y: el.y }, // nw
-                { x: el.x + el.w / 2, y: el.y }, // n
-                { x: el.x + el.w, y: el.y }, // ne
-                { x: el.x + el.w, y: el.y + el.h / 2 }, // e
-                { x: el.x + el.w, y: el.y + el.h }, // se
-                { x: el.x + el.w / 2, y: el.y + el.h }, // s
-                { x: el.x, y: el.y + el.h }, // sw
-                { x: el.x, y: el.y + el.h / 2 }, // w
-              ];
+                const hPoints = [
+                  { x: el.x, y: el.y }, // nw
+                  { x: el.x + el.w / 2, y: el.y }, // n
+                  { x: el.x + el.w, y: el.y }, // ne
+                  { x: el.x + el.w, y: el.y + el.h / 2 }, // e
+                  { x: el.x + el.w, y: el.y + el.h }, // se
+                  { x: el.x + el.w / 2, y: el.y + el.h }, // s
+                  { x: el.x, y: el.y + el.h }, // sw
+                  { x: el.x, y: el.y + el.h / 2 }, // w
+                ];
 
-              hPoints.forEach((pt) => {
-                eCtx.fillRect(
-                  pt.x - handleRadius,
-                  pt.y - handleRadius,
-                  handleRadius * 2,
-                  handleRadius * 2,
-                );
-                eCtx.strokeRect(
-                  pt.x - handleRadius,
-                  pt.y - handleRadius,
-                  handleRadius * 2,
-                  handleRadius * 2,
-                );
-              });
-              eCtx.restore();
+                hPoints.forEach((pt) => {
+                  eCtx.fillRect(
+                    pt.x - handleRadius,
+                    pt.y - handleRadius,
+                    handleRadius * 2,
+                    handleRadius * 2,
+                  );
+                  eCtx.strokeRect(
+                    pt.x - handleRadius,
+                    pt.y - handleRadius,
+                    handleRadius * 2,
+                    handleRadius * 2,
+                  );
+                });
+                eCtx.restore();
+              } else if (el.type === "line") {
+                // 直線用：始点・終点の2つの円ハンドルを描画
+                eCtx.save();
+                eCtx.fillStyle = "#2563eb";
+                eCtx.strokeStyle = "#ffffff";
+                eCtx.lineWidth = 1.5;
+                const handleRadius = 5;
+
+                const hPoints = [
+                  { x: el.x, y: el.y }, // start
+                  { x: el.x + el.w, y: el.y + el.h }, // end
+                ];
+
+                hPoints.forEach((pt) => {
+                  eCtx.beginPath();
+                  eCtx.arc(pt.x, pt.y, handleRadius, 0, Math.PI * 2);
+                  eCtx.fill();
+                  eCtx.stroke();
+                });
+                eCtx.restore();
+              }
             }
           }
         });
@@ -1420,11 +1526,12 @@
 
         // 2. 選択・移動モードの処理（複数選択対応 + リサイズ対応）
         if (currentTool === "select") {
-          // 単一選択中かつ、rectもしくはwhiteoutの場合は、リサイズハンドルのクリック判定を最初に行う
+          // 単一選択中かつ、rect / whiteout / line の場合は、リサイズハンドルのクリック判定を最初に行う
           if (
             selectedElements.length === 1 &&
             (selectedElements[0].type === "rect" ||
-              selectedElements[0].type === "whiteout")
+              selectedElements[0].type === "whiteout" ||
+              selectedElements[0].type === "line")
           ) {
             const handle = getResizeHandleAt(pos.x, pos.y, selectedElements[0]);
             if (handle) {
@@ -1553,7 +1660,7 @@
           return;
         }
 
-        // 4. その他の手書き・図形描画モード
+        // 4. その他の手書き・図形・直線描画モード
         isDrawing = true;
         const newId = Date.now() + Math.random().toString(36).substr(2, 5);
         if (currentTool === "free") {
@@ -1569,16 +1676,45 @@
 
       function moveAction(e) {
         const pos = getEventPos(e);
-        const curX = pos.x;
-        const curY = pos.y;
+        let curX = pos.x;
+        let curY = pos.y;
 
         // --- A. リサイズ調整中の場合 ---
         if (isResizing && resizeTarget) {
           const dx = curX - dragStartX;
           const dy = curY - dragStartY;
           const start = resizeStartRect;
-          const minSize = 8; // 最小サイズ
 
+          // 直線（Line）の端点移動リサイズ処理（Shiftによる45度スナップ対応）
+          if (resizeTarget.type === "line") {
+            if (resizeHandle === "start") {
+              // 終点を固定して、始点(x, y)を動かす
+              const fixedX = start.x + start.w;
+              const fixedY = start.y + start.h;
+              let targetPos = { x: curX, y: curY };
+              if (e.shiftKey) {
+                targetPos = getSnappedPos(fixedX, fixedY, curX, curY);
+              }
+              resizeTarget.x = targetPos.x;
+              resizeTarget.y = targetPos.y;
+              resizeTarget.w = fixedX - targetPos.x;
+              resizeTarget.h = fixedY - targetPos.y;
+            } else if (resizeHandle === "end") {
+              // 始点(x, y)を固定して、終点を動かす
+              const fixedX = start.x;
+              const fixedY = start.y;
+              let targetPos = { x: curX, y: curY };
+              if (e.shiftKey) {
+                targetPos = getSnappedPos(fixedX, fixedY, curX, curY);
+              }
+              resizeTarget.w = targetPos.x - fixedX;
+              resizeTarget.h = targetPos.y - fixedY;
+            }
+            drawEditorLayers();
+            return;
+          }
+
+          const minSize = 8; // 最小サイズ
           let nextX = start.x;
           let nextY = start.y;
           let nextW = start.w;
@@ -1691,7 +1827,8 @@
             if (
               selectedElements.length === 1 &&
               (selectedElements[0].type === "rect" ||
-                selectedElements[0].type === "whiteout")
+                selectedElements[0].type === "whiteout" ||
+                selectedElements[0].type === "line")
             ) {
               const handle = getResizeHandleAt(curX, curY, selectedElements[0]);
               if (handle) {
@@ -1722,7 +1859,19 @@
         eCtx.lineCap = "round";
         eCtx.lineJoin = "round";
 
-        if (currentTool === "rect") {
+        if (currentTool === "line") {
+          let drawEndX = curX;
+          let drawEndY = curY;
+          if (e.shiftKey) {
+            const snapped = getSnappedPos(startX, startY, curX, curY);
+            drawEndX = snapped.x;
+            drawEndY = snapped.y;
+          }
+          eCtx.beginPath();
+          eCtx.moveTo(startX, startY);
+          eCtx.lineTo(drawEndX, drawEndY);
+          eCtx.stroke();
+        } else if (currentTool === "rect") {
           eCtx.strokeRect(startX, startY, curX - startX, curY - startY);
         } else if (currentTool === "whiteout") {
           eCtx.fillStyle = color; // 選択カラーを使用
@@ -1780,7 +1929,7 @@
               );
 
               if (e.shiftKey) {
-                // Shiftキー押下中の場合は、重複なく既存 of 選択リストへ合体（マージ）
+                // Shiftキー押下中の場合は、重複なく既存の選択リストへ合体（マージ）
                 newlySelected.forEach((el) => {
                   if (!selectedElements.some((s) => s.id === el.id)) {
                     selectedElements.push(el);
@@ -1800,14 +1949,30 @@
         isDrawing = false;
 
         const pos = getEventPos(e);
-        const endX = pos.x;
-        const endY = pos.y;
+        let endX = pos.x;
+        let endY = pos.y;
 
         const color = colorPicker.value;
         const size = parseInt(sizeSlider.value);
         const newId = Date.now() + Math.random().toString(36).substr(2, 5);
 
-        if (currentTool === "rect" || currentTool === "whiteout") {
+        if (currentTool === "line") {
+          if (e.shiftKey) {
+            const snapped = getSnappedPos(startX, startY, endX, endY);
+            endX = snapped.x;
+            endY = snapped.y;
+          }
+          annotationsPerPage[currentPageNum].push({
+            id: newId,
+            type: "line",
+            x: startX,
+            y: startY,
+            w: endX - startX,
+            h: endY - startY,
+            color: color,
+            size: size,
+          });
+        } else if (currentTool === "rect" || currentTool === "whiteout") {
           const newEl = {
             id: newId,
             type: currentTool,
@@ -1901,7 +2066,12 @@
           tCtx.lineCap = "round";
           tCtx.lineJoin = "round";
 
-          if (el.type === "rect") {
+          if (el.type === "line") {
+            tCtx.beginPath();
+            tCtx.moveTo(el.x * scaleX, el.y * scaleY);
+            tCtx.lineTo((el.x + el.w) * scaleX, (el.y + el.h) * scaleY);
+            tCtx.stroke();
+          } else if (el.type === "rect") {
             tCtx.strokeRect(
               el.x * scaleX,
               el.y * scaleY,
