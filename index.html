@@ -295,7 +295,7 @@
             </div>
           </div>
 
-          <!-- 太さ・色調整 -->
+          <!-- 太さ・色・不透明度調整 -->
           <div class="border-t border-slate-100 pt-4 flex flex-col gap-4">
             <div>
               <div
@@ -337,7 +337,7 @@
               </div>
             </div>
 
-            <!-- 【新機能】直感的な不透明度調整スライダーの追加 -->
+            <!-- 直感的な不透明度調整スライダーの追加 -->
             <div>
               <div
                 class="flex justify-between text-xs font-bold text-slate-400 mb-1"
@@ -676,7 +676,7 @@
         whiteout: "#ffffff", // 塗りつぶし消しゴム（デフォルト：白）
       };
 
-      // 【新機能】ツールごとの「前回使った不透明度」を記憶するオブジェクト
+      // ツールごとの「前回使った不透明度」を記憶するオブジェクト
       const toolOpacities = {
         text: 1.0,
         rect: 1.0,
@@ -702,7 +702,7 @@
       const sizeSlider = document.getElementById("sizeSlider");
       const sizeValueDisplay = document.getElementById("sizeValue");
 
-      // 【新機能】不透明度スライダー要素の取得
+      // 不透明度スライダー要素の取得
       const opacitySlider = document.getElementById("opacitySlider");
       const opacityValueDisplay = document.getElementById("opacityValue");
 
@@ -725,7 +725,7 @@
         return dx * dx + dy * dy;
       }
 
-      // 【新機能】不透明度スライダーの値が手動で変更された場合のイベント処理
+      // 不透明度スライダーの値が手動で変更された場合のイベント処理
       opacitySlider.addEventListener("input", (e) => {
         const newOpacity = parseInt(e.target.value) / 100;
         opacityValueDisplay.textContent = `${e.target.value} %`;
@@ -796,6 +796,123 @@
         if (file) loadPdfFile(file);
       });
 
+      // ドラッグアンドドロップへの対応
+      uploadZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        uploadZone.classList.add("border-blue-500", "bg-blue-50/50");
+      });
+      uploadZone.addEventListener("dragleave", () => {
+        uploadZone.classList.remove("border-blue-500", "bg-blue-50/50");
+      });
+      uploadZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const files = e.dataTransfer.files;
+        if (files.length > 0 && files[0].type === "application/pdf") {
+          loadPdfFile(files[0]);
+        } else {
+          showToast("PDFファイルをドラッグしてください。");
+        }
+      });
+
+      function showToast(msg) {
+        const el = document.getElementById("toastMessage");
+        el.textContent = msg;
+        el.classList.remove("hidden");
+        setTimeout(() => el.classList.add("hidden"), 6000);
+      }
+
+      // カスタムポップアップダイアログの表示処理
+      function showCustomConfirm(message, onConfirm) {
+        const modal = document.getElementById("confirmModal");
+        const msgEl = document.getElementById("confirmModalMessage");
+        const cancelBtn = document.getElementById("confirmCancelBtn");
+        const okBtn = document.getElementById("confirmOkBtn");
+
+        msgEl.textContent = message;
+        modal.classList.remove("hidden");
+
+        // 既存のイベントリスナーを完全に削除・再生成してバインド
+        const newCancelBtn = cancelBtn.cloneNode(true);
+        const newOkBtn = okBtn.cloneNode(true);
+        cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+        okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+
+        newCancelBtn.addEventListener("click", () => {
+          modal.classList.add("hidden");
+        });
+
+        newOkBtn.addEventListener("click", () => {
+          modal.classList.add("hidden");
+          onConfirm();
+        });
+      }
+
+      async function loadPdfFile(file) {
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          rawPdfBytes = new Uint8Array(arrayBuffer);
+
+          // pdfjs-distはWeb Workerを使用する際、内部でArrayBufferを別スレッドに転送(デタッチ)してしまい、
+          // メインスレッド側のバッファサイズが0に破壊されてしまいます。
+          // これを防ぐために、表示用ライブラリには必ずコピーしたクローンバッファ（slice(0)）を渡します。
+          pdfDoc = await pdfjsLib.getDocument({ data: rawPdfBytes.slice(0) })
+            .promise;
+          totalPages = pdfDoc.numPages;
+
+          document.getElementById("pageTotal").textContent = totalPages;
+          document.getElementById("uploadZone").classList.add("hidden");
+          document.getElementById("editorWorkspace").classList.remove("hidden");
+
+          currentPageNum = 1;
+          await renderPage(currentPageNum);
+          setTool("select"); // 最初は選択移動ツールをデフォルトに
+        } catch (err) {
+          showToast("PDFの読み込みに失敗しました。詳細: " + err.message);
+        }
+      }
+
+      async function renderPage(pageNum) {
+        if (!pdfDoc) return;
+        const page = await pdfDoc.getPage(pageNum);
+        const viewport = page.getViewport({ scale: 1.5 });
+
+        pdfCanvas.width = viewport.width;
+        pdfCanvas.height = viewport.height;
+        editorCanvas.width = viewport.width;
+        editorCanvas.height = viewport.height;
+
+        pageViewportSizes[pageNum] = {
+          width: viewport.width,
+          height: viewport.height,
+        };
+
+        if (!annotationsPerPage[pageNum]) {
+          annotationsPerPage[pageNum] = [];
+        }
+
+        await page.render({ canvasContext: pCtx, viewport: viewport }).promise;
+
+        document.getElementById("pageCurrent").textContent = pageNum;
+        document.getElementById("prevPageBtn").disabled = pageNum <= 1;
+        document.getElementById("nextPageBtn").disabled = pageNum >= totalPages;
+
+        // 選択状態を一度クリア
+        selectedElements = [];
+        updateDeleteButtonVisibility();
+        drawEditorLayers();
+      }
+
+      async function changePage(offset) {
+        const targetPage = currentPageNum + offset;
+        if (targetPage >= 1 && targetPage <= totalPages) {
+          const textInput = document.querySelector(".text-input-popup");
+          if (textInput) textInput.blur();
+
+          currentPageNum = targetPage;
+          await renderPage(currentPageNum);
+        }
+      }
+
       // クイック色選択ボタン押下時の処理
       function quickColor(hex, name) {
         colorPicker.value = hex;
@@ -817,32 +934,6 @@
           });
           drawEditorLayers();
         }
-      }
-
-      // RGB値をHEX文字列（#ffffff形式）に変換する補助関数
-      function rgbToHex(r, g, b) {
-        return (
-          "#" +
-          [r, g, b]
-            .map((x) => {
-              const hex = x.toString(16);
-              return hex.length === 1 ? "0" + hex : hex;
-            })
-            .join("")
-        );
-      }
-
-      // カラー表示のテキスト更新処理
-      const colorNames = {
-        "#ef4444": "赤",
-        "#3b82f6": "青",
-        "#10b981": "緑",
-        "#000000": "黒",
-        "#ffffff": "白",
-      };
-      function updateColorDisplayText(hex) {
-        const text = colorNames[hex.toLowerCase()] || "カスタム色";
-        document.getElementById("currentColorText").textContent = text;
       }
 
       // 描画レイヤーの更新（キャンバス上の全要素の再描画）
@@ -1069,7 +1160,7 @@
           updateColorDisplayText(savedColor);
         }
 
-        // 【新機能】切り替え先ツールに記憶されている不透明度を呼び出して設定
+        // 切り替え先ツールに記憶されている不透明度を呼び出して設定
         if (toolOpacities[toolName] !== undefined) {
           const savedOpacity = toolOpacities[toolName];
           opacitySlider.value = Math.round(savedOpacity * 100);
@@ -1082,121 +1173,6 @@
           updateDeleteButtonVisibility();
           drawEditorLayers();
         }
-      }
-
-      // キャンバス上の要素を検知する関数
-      function findElementAt(x, y) {
-        const items = annotationsPerPage[currentPageNum] || [];
-        // クリックした位置の手前（配列の最後尾）にある要素から優先的に探す
-        for (let i = items.length - 1; i >= 0; i--) {
-          const el = items[i];
-          if (el.type === "text") {
-            const textWidth = el.text.length * el.size * 0.95;
-            const textHeight = el.size * 1.5;
-            if (
-              x >= el.x &&
-              x <= el.x + textWidth &&
-              y >= el.y &&
-              y <= el.y + textHeight
-            ) {
-              return el;
-            }
-          } else if (el.type === "rect" || el.type === "whiteout") {
-            const x1 = Math.min(el.x, el.x + el.w);
-            const x2 = Math.max(el.x, el.x + el.w);
-            const y1 = Math.min(el.y, el.y + el.h);
-            const y2 = Math.max(el.y, el.y + el.h);
-            if (x >= x1 && x <= x2 && y >= y1 && y <= y2) {
-              return el;
-            }
-          } else if (el.type === "line") {
-            // 直線要素のクリック判定
-            const sqDist = getSqSegDist(x, y, el.x1, el.y1, el.x2, el.y2);
-            if (sqDist < 100) {
-              // 10の二乗 = 100
-              return el;
-            }
-          } else if (el.type === "free") {
-            // 手書き線の場合、いずれかの点とクリック位置が近ければ検出
-            for (const pt of el.points) {
-              const dist = Math.hypot(pt.x - x, pt.y - y);
-              if (dist < 15) {
-                return el;
-              }
-            }
-          }
-        }
-        return null;
-      }
-
-      // 要素がドラッグ範囲選択ボックスに入っているか判定する関数
-      function isElementInBox(el, bx1, bx2, by1, by2) {
-        let ex1, ex2, ey1, ey2;
-        if (el.type === "text") {
-          const textWidth = el.text.length * el.size * 0.95;
-          const textHeight = el.size * 1.5;
-          ex1 = el.x;
-          ex2 = el.x + textWidth;
-          ey1 = el.y;
-          ey2 = el.y + textHeight;
-        } else if (el.type === "rect" || el.type === "whiteout") {
-          ex1 = Math.min(el.x, el.x + el.w);
-          ex2 = Math.max(el.x, el.x + el.w);
-          ey1 = Math.min(el.y, el.y + el.h);
-          ey2 = Math.max(el.y, el.y + el.h);
-        } else if (el.type === "line") {
-          ex1 = Math.min(el.x1, el.x2);
-          ex2 = Math.max(el.x1, el.x2);
-          ey1 = Math.min(el.y1, el.y2);
-          ey2 = Math.max(el.y1, el.y2);
-        } else if (el.type === "free") {
-          const xs = el.points.map((p) => p.x);
-          const ys = el.points.map((p) => p.y);
-          ex1 = Math.min(...xs);
-          ex2 = Math.max(...xs);
-          ey1 = Math.min(...ys);
-          ey2 = Math.max(...ys);
-        }
-
-        return ex1 < bx2 && ex2 > bx1 && ey1 < by2 && ey2 > by1;
-      }
-
-      // 指定された座標にあるリサイズハンドルを検出する関数
-      function getHandleAt(el, x, y) {
-        const clickTolerance = 10; // 押しやすいよう、判定の広さを少し広めに確保します
-
-        if (el.type === "line") {
-          // 直線の場合は始点と終点のハンドルを検出
-          if (Math.hypot(el.x1 - x, el.y1 - y) <= clickTolerance) return "L1";
-          if (Math.hypot(el.x2 - x, el.y2 - y) <= clickTolerance) return "L2";
-          return null;
-        }
-
-        const x1 = Math.min(el.x, el.x + el.w);
-        const x2 = Math.max(el.x, el.x + el.w);
-        const y1 = Math.min(el.y, el.y + el.h);
-        const y2 = Math.max(el.y, el.y + el.h);
-        const cx = (x1 + x2) / 2;
-        const cy = (y1 + y2) / 2;
-
-        const handles = {
-          TL: { x: x1, y: y1 },
-          TR: { x: x2, y: y1 },
-          BL: { x: x1, y: y2 },
-          BR: { x: x2, y: y2 },
-          TC: { x: cx, y: y1 },
-          BC: { x: cx, y: y2 },
-          LC: { x: x1, y: cy },
-          RC: { x: x2, y: cy },
-        };
-
-        for (const key in handles) {
-          const h = handles[key];
-          if (Math.hypot(h.x - x, h.y - y) <= clickTolerance) {
-            return key;
-          }
-        }
-        return null;
       }
 
       // 選択された要素を削除
@@ -1449,7 +1425,6 @@
               sizeSlider.value = primarySel.size;
               sizeValueDisplay.textContent = `${primarySel.size} px`;
             }
-            // 【新機能】選択した要素の不透明度をスライダーに反映
             if (primarySel.opacity !== undefined) {
               opacitySlider.value = Math.round(primarySel.opacity * 100);
               opacityValueDisplay.textContent = `${Math.round(primarySel.opacity * 100)} %`;
@@ -1505,7 +1480,7 @@
                 text: textVal,
                 color: color,
                 size: size,
-                opacity: opacity, // 不透明度をアノテーションデータに記録
+                opacity: opacity,
               });
               drawEditorLayers();
             }
@@ -1528,7 +1503,7 @@
             type: "free",
             color: color,
             size: size,
-            opacity: opacity, // 不透明度を記録
+            opacity: opacity,
             points: [{ x: startX, y: startY }],
           };
         }
@@ -1874,6 +1849,17 @@
         if (found && found.type === "text") editTextElement(found);
       });
 
+      // Base64文字列を安全にUint8Array（バイナリ）に変換する関数
+      function base64ToUint8Array(base64) {
+        const raw = window.atob(base64);
+        const rawLength = raw.length;
+        const array = new Uint8Array(new ArrayBuffer(rawLength));
+        for (let i = 0; i < rawLength; i++) {
+          array[i] = raw.charCodeAt(i);
+        }
+        return array;
+      }
+
       // 【最高画質画像合成エンジン（4倍超解像度/300DPI相当）】
       function generateOverlayImage(
         items,
@@ -1893,7 +1879,7 @@
 
         items.forEach((el) => {
           tCtx.save();
-          // PDF出力層にも個別に設定された「不透明度」を完全に反映（これでにじまず・透かし付きで完全出力されます）
+          // PDF出力層にも個別に設定された「不透明度」を完全に反映
           tCtx.globalAlpha = el.opacity !== undefined ? el.opacity : 1.0;
 
           tCtx.strokeStyle = el.color;
