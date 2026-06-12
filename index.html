@@ -936,7 +936,6 @@
         }
       }
 
-      // 描画レイヤーの更新（キャンバス上の全要素の再描画）
       function drawEditorLayers() {
         eCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
         const items = annotationsPerPage[currentPageNum] || [];
@@ -1117,7 +1116,6 @@
         }
       }
 
-      // ツールのトグル処理（ホバーとの色の競合を完全に防ぎます）
       function setTool(toolName) {
         currentTool = toolName;
 
@@ -1214,7 +1212,6 @@
         showToast(`${copiedElements.length}個の要素をコピーしました。`);
       }
 
-      // 要素の貼り付け
       function pasteElements() {
         if (copiedElements.length === 0) {
           showToast("コピーされた要素がありません。");
@@ -1274,7 +1271,6 @@
         );
       }
 
-      // 文字要素の再編集処理
       function editTextElement(el) {
         if (document.querySelector(".text-input-popup")) return;
 
@@ -1327,7 +1323,6 @@
         });
       }
 
-      // マウス・タッチ操作イベント定義
       function startAction(e) {
         const pos = getEventPos(e);
         startX = pos.x;
@@ -1849,7 +1844,6 @@
         if (found && found.type === "text") editTextElement(found);
       });
 
-      // Base64文字列を安全にUint8Array（バイナリ）に変換する関数
       function base64ToUint8Array(base64) {
         const raw = window.atob(base64);
         const rawLength = raw.length;
