@@ -76,7 +76,7 @@
               かんたんPDF書き込み・編集ツール
             </h1>
             <p class="text-xs text-slate-500">
-              文字や図形・直線の書き込み、移動、サイズや透明度の調整、背景色に合わせた文字消しがスムーズに行えます
+              文字やふりがな（ルビ）、図形・直線の書き込み、移動、サイズや透明度の調整、背景色に合わせた文字消しがスムーズに行えます
             </p>
           </div>
         </div>
@@ -552,7 +552,16 @@
             <div
               class="text-xs text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 font-medium"
             >
-              ※不透明度を下げると、蛍光マーカーペンのような書き込みや透かし文字もカンタンに作れます。
+              ※「文字の書き込み」で
+              <code
+                class="text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded font-mono font-bold"
+                >{親文字:るび}</code
+              >
+              と入力するとルビ（ふりがな）が振れます（例:
+              <code
+                class="text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded font-mono font-bold"
+                >{漢字:かんじ}</code
+              >）
             </div>
           </div>
 
@@ -662,7 +671,7 @@
       // ツールごとの「前回使った色」を記憶するオブジェクト
       const toolColors = {
         text: "#000000", // 文字の書き込み
-        line: "#000000", // 直線（デフォルト：黒）
+        line: "#000000", // 直線
         rect: "#000000", // 四角形
         free: "#000000", // 手書きペン
         whiteout: "#ffffff", // 塗りつぶし消しゴム
@@ -695,6 +704,70 @@
       const sizeValueDisplay = document.getElementById("sizeValue");
       const opacitySlider = document.getElementById("opacitySlider");
       const opacityValueDisplay = document.getElementById("opacityValue");
+
+      // --- ルビ（ふりがな）機能用の補助関数 ---
+      // {親文字:るび} 形式のテキストを解析してオブジェクトの配列に変換する
+      function parseRubyText(text) {
+        const result = [];
+        const regex = /\{([^:]+):([^}]+)\}/g;
+        let lastIndex = 0;
+        let match;
+
+        while ((match = regex.exec(text)) !== null) {
+          if (match.index > lastIndex) {
+            result.push({
+              type: "normal",
+              text: text.substring(lastIndex, match.index),
+            });
+          }
+          result.push({
+            type: "ruby",
+            text: match[1],
+            ruby: match[2],
+          });
+          lastIndex = regex.lastIndex;
+        }
+
+        if (lastIndex < text.length) {
+          result.push({
+            type: "normal",
+            text: text.substring(lastIndex),
+          });
+        }
+
+        if (result.length === 0) {
+          result.push({
+            type: "normal",
+            text: text,
+          });
+        }
+
+        return result;
+      }
+
+      // ルビ付きテキストのキャンバス上の実描画幅をピクセル単位で正確に測定する
+      function measureEditorTextWidth(el) {
+        eCtx.save();
+        const fontSize = el.size * 1.5;
+        eCtx.font = `${fontSize}px sans-serif`;
+        const parts = parseRubyText(el.text);
+        let totalWidth = 0;
+
+        parts.forEach((part) => {
+          if (part.type === "normal") {
+            totalWidth += eCtx.measureText(part.text).width;
+          } else {
+            const textWidth = eCtx.measureText(part.text).width;
+            eCtx.font = `${fontSize * 0.5}px sans-serif`;
+            const rubyWidth = eCtx.measureText(part.ruby).width;
+            eCtx.font = `${fontSize}px sans-serif`; // フォントを親文字サイズに戻す
+            totalWidth += Math.max(textWidth, rubyWidth);
+          }
+        });
+
+        eCtx.restore();
+        return totalWidth;
+      }
 
       // カラーピッカーの値が手動で変更された場合のイベント処理
       colorPicker.addEventListener("input", (e) => {
@@ -976,7 +1049,7 @@
           updateColorDisplayText(savedColor);
         }
 
-        // --- 切り替え先ツールに記憶されている不透明度を呼び出して設定 ---
+        // 切り替え先ツールに記憶されている不透明度を呼び出して設定
         if (toolOpacities[toolName] !== undefined) {
           const savedOpacity = toolOpacities[toolName];
           const percent = Math.round(savedOpacity * 100);
@@ -1010,8 +1083,13 @@
         for (let i = items.length - 1; i >= 0; i--) {
           const el = items[i];
           if (el.type === "text") {
-            const textWidth = el.text.length * el.size * 0.95;
-            const textHeight = el.size * 1.5;
+            const textWidth = measureEditorTextWidth(el);
+            const fontSize = el.size * 1.5;
+            const parts = parseRubyText(el.text);
+            const hasRuby = parts.some((p) => p.type === "ruby");
+            const textHeight = hasRuby
+              ? fontSize + fontSize * 0.5 * 1.1
+              : fontSize;
             if (
               x >= el.x &&
               x <= el.x + textWidth &&
@@ -1057,8 +1135,13 @@
       function isElementInBox(el, bx1, bx2, by1, by2) {
         let ex1, ex2, ey1, ey2;
         if (el.type === "text") {
-          const textWidth = el.text.length * el.size * 0.95;
-          const textHeight = el.size * 1.5;
+          const textWidth = measureEditorTextWidth(el);
+          const fontSize = el.size * 1.5;
+          const parts = parseRubyText(el.text);
+          const hasRuby = parts.some((p) => p.type === "ruby");
+          const textHeight = hasRuby
+            ? fontSize + fontSize * 0.5 * 1.1
+            : fontSize;
           ex1 = el.x;
           ex2 = el.x + textWidth;
           ey1 = el.y;
@@ -1195,9 +1278,44 @@
             }
             eCtx.stroke();
           } else if (el.type === "text") {
-            eCtx.font = `${el.size * 1.5}px sans-serif`;
-            eCtx.textBaseline = "top";
-            eCtx.fillText(el.text, el.x, el.y);
+            // ルビ（ふりがな）付きテキストの高度な2階層レンダリング
+            const fontSize = el.size * 1.5;
+            const rubyFontSize = fontSize * 0.5;
+            const rubySpace = rubyFontSize * 1.1; // ルビを描画するためのスペース高
+
+            const parts = parseRubyText(el.text);
+            const hasRuby = parts.some((p) => p.type === "ruby");
+
+            let currentX = el.x;
+
+            parts.forEach((part) => {
+              if (part.type === "normal") {
+                eCtx.font = `${fontSize}px sans-serif`;
+                eCtx.textBaseline = "top";
+                // ルビが存在するテキスト要素の場合、通常文字はベースラインを揃えるため少し下げて描く
+                const yPos = hasRuby ? el.y + rubySpace : el.y;
+                eCtx.fillText(part.text, currentX, yPos);
+                currentX += eCtx.measureText(part.text).width;
+              } else if (part.type === "ruby") {
+                // 親文字（漢字など）の描画
+                eCtx.font = `${fontSize}px sans-serif`;
+                const textWidth = eCtx.measureText(part.text).width;
+                eCtx.textBaseline = "top";
+                const yPos = hasRuby ? el.y + rubySpace : el.y;
+                eCtx.fillText(part.text, currentX, yPos);
+
+                // ルビ文字の描画
+                eCtx.font = `${rubyFontSize}px sans-serif`;
+                const rubyWidth = eCtx.measureText(part.ruby).width;
+                // ルビは親文字の水平方向の中央位置に揃える
+                const rubyX = currentX + (textWidth - rubyWidth) / 2;
+                const rubyY = el.y;
+                eCtx.fillText(part.ruby, rubyX, rubyY);
+
+                // 次のパーツの開始位置（ルビか親文字の長い方を採用し、文字重なりを完璧に防止）
+                currentX += Math.max(textWidth, rubyWidth);
+              }
+            });
           }
           eCtx.restore(); // 描画状態をリセット
 
@@ -1213,8 +1331,12 @@
               bw = 0,
               bh = 0;
             if (el.type === "text") {
-              bw = el.text.length * el.size * 0.95;
-              bh = el.size * 1.5;
+              const fontSize = el.size * 1.5;
+              const parts = parseRubyText(el.text);
+              const hasRuby = parts.some((p) => p.type === "ruby");
+
+              bw = measureEditorTextWidth(el);
+              bh = hasRuby ? fontSize + fontSize * 0.5 * 1.1 : fontSize;
             } else if (
               el.type === "rect" ||
               el.type === "whiteout" ||
@@ -2195,10 +2317,40 @@
             }
             tCtx.stroke();
           } else if (el.type === "text") {
-            // PDFの実サイズ（高解像度）に合わせて文字サイズを拡大描画し、画面表示と完全に一致させます
-            tCtx.font = `${el.size * 1.5 * scaleY}px sans-serif`;
-            tCtx.textBaseline = "top";
-            tCtx.fillText(el.text, el.x * scaleX, el.y * scaleY);
+            // PDFの実サイズ（高解像度）に合わせて文字サイズ・ルビサイズを拡大合成
+            const fontSize = el.size * 1.5 * scaleY;
+            const rubyFontSize = fontSize * 0.5;
+            const rubySpace = rubyFontSize * 1.1;
+
+            const parts = parseRubyText(el.text);
+            const hasRuby = parts.some((p) => p.type === "ruby");
+
+            let currentX = el.x * scaleX;
+            const baseTargetY = el.y * scaleY;
+
+            parts.forEach((part) => {
+              if (part.type === "normal") {
+                tCtx.font = `${fontSize}px sans-serif`;
+                tCtx.textBaseline = "top";
+                const yPos = hasRuby ? baseTargetY + rubySpace : baseTargetY;
+                tCtx.fillText(part.text, currentX, yPos);
+                currentX += tCtx.measureText(part.text).width;
+              } else if (part.type === "ruby") {
+                tCtx.font = `${fontSize}px sans-serif`;
+                const textWidth = tCtx.measureText(part.text).width;
+                tCtx.textBaseline = "top";
+                const yPos = hasRuby ? baseTargetY + rubySpace : baseTargetY;
+                tCtx.fillText(part.text, currentX, yPos);
+
+                tCtx.font = `${rubyFontSize}px sans-serif`;
+                const rubyWidth = tCtx.measureText(part.ruby).width;
+                const rubyX = currentX + (textWidth - rubyWidth) / 2;
+                const rubyY = baseTargetY;
+                tCtx.fillText(part.ruby, rubyX, rubyY);
+
+                currentX += Math.max(textWidth, rubyWidth);
+              }
+            });
           }
           tCtx.restore();
         });
